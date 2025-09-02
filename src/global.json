@@ -1,5 +1,9 @@
 {
   "sdk": {
+<<<<<<< HEAD
     "version": "8.0.415"
+=======
+    "version": "8.0.101"
+>>>>>>> ba2ce9f2 (Added RISC-V exlusive changes only)
   }
 }
