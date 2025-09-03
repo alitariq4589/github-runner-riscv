@@ -17,8 +17,10 @@ jobs:
     
     - name: Install Prerequisites
       run: |
-        apt-get update && apt upgrade -y
-        apt-get install nodejs npm -y
+        apt-get update 
+        apt-get install nodejs npm nvm -y
+        nvm install 24 && nvm alias default 24
+        node -v
 
     - uses: actions/checkout@v5
     
