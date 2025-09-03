@@ -18,9 +18,7 @@ jobs:
     - name: Install Prerequisites
       run: |
         apt-get update 
-        apt-get install nodejs npm nvm -y
-        nvm install 24 && nvm alias default 24
-        node -v
+        apt-get install nodejs npm -y
 
     - name: Clone Repository
       run: |
