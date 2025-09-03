@@ -12,17 +12,21 @@ jobs:
   build:
     runs-on: pioneer-box
     container:
-      image: riscv64/debian:trixie
+      image: riscv64/ubuntu:24.04
     steps:
     
     - name: Install Prerequisites
       run: |
+        export DEBIAN_FRONTEND=noninteractive TZ=UTC
         apt-get update 
-        apt-get install nodejs npm wget -y
+        apt-get install -y build-essential tzdata libicu70 libtinfo6 libssl3 zlib1g libc6 libstdc++6 libgcc-s1
+
+    - name: Clean up
+      run: |
+        rm -rf github-runner-riscv $GITHUB_WORKSPACE/packages $GITHUB_WORKSPACE/dotnet*
 
     - name: Clone Repository
       run: |
-        rm -rf github-runner-riscv
         git clone -b main_riscv --depth=1 https://github.com/alitariq4589/github-runner-riscv.git
     
     - name: Download .NET and related packages
