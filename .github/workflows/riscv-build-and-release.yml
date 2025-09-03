@@ -22,6 +22,7 @@ jobs:
 
     - name: Clone Repository
       run: |
+        rm -rf github-runner-riscv
         git clone -b main_riscv --depth=1 https://github.com/alitariq4589/github-runner-riscv.git
     
     - name: Download .NET and related packages
