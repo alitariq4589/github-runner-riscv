@@ -18,7 +18,7 @@ jobs:
     - name: Install Prerequisites
       run: |
         apt-get update 
-        apt-get install nodejs npm -y
+        apt-get install nodejs npm wget -y
 
     - name: Clone Repository
       run: |
