@@ -11,10 +11,17 @@ on:
 jobs:
   build:
     runs-on: pioneer-box
-
+    container:
+      image: riscv64/ubuntu:24.04
     steps:
     - uses: actions/checkout@v5
-
+    
+    
+    - name: Install Prerequisites
+      run: |
+        apt-get update && apt upgrade -y
+        apt-get install nodejs npm -y
+    
     - name: Download .NET and related packages
       run: |
         # Fetching Dotnet
