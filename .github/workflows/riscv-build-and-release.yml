@@ -14,13 +14,13 @@ jobs:
     container:
       image: riscv64/ubuntu:24.04
     steps:
-    - uses: actions/checkout@v5
-    
     
     - name: Install Prerequisites
       run: |
         apt-get update && apt upgrade -y
         apt-get install nodejs npm -y
+
+    - uses: actions/checkout@v5
     
     - name: Download .NET and related packages
       run: |
