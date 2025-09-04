@@ -17,9 +17,10 @@ jobs:
     
     - name: Install Prerequisites
       run: |
-        export DEBIAN_FRONTEND=noninteractive TZ=UTC
+        export DEBIAN_FRONTEND=noninteractive
         apt-get update 
         apt-get install -y curl wget git build-essential libicu-dev tzdata libtinfo6 libssl3 zlib1g libc6 libstdc++6 libgcc-s1
+        dpkg-reconfigure -f noninteractive tzdata
 
     - name: Clean up
       run: |
