@@ -19,7 +19,7 @@ jobs:
       run: |
         export DEBIAN_FRONTEND=noninteractive TZ=UTC
         apt-get update 
-        apt-get install -y wget git build-essential tzdata libtinfo6 libssl3 zlib1g libc6 libstdc++6 libgcc-s1
+        apt-get install -y wget git build-essential libicu-dev tzdata libtinfo6 libssl3 zlib1g libc6 libstdc++6 libgcc-s1
 
     - name: Clean up
       run: |
