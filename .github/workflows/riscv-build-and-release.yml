@@ -13,9 +13,11 @@ on:
 jobs:
   build:
     runs-on: pioneer-box
+    
+    outputs:
+      version-number: ${{ steps.check-version.outputs.RUNNER_VERSION }}
+
     steps:
-
-
     - name: Checkout repository
       uses: actions/checkout@v5
     
@@ -55,13 +57,19 @@ jobs:
 
     - name: Package
       run: |
-
         cd src && ./dev.sh package Release linux-riscv64
+    
+    - name: Check Version
+      id: check-version
+      run: |
+        RUNNER_VERSION=$(./_layout/bin/Runner.Listener --version)
+        echo "The Github runner version is $RUNNER_VERSION"
+        echo "$RUNNER_VERSION" > $GITHUB_OUTPUT
 
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: actions-runner-linux-riscv64
+        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.RUNNER_VERSION }}
         path: "_package/actions-runner-linux-riscv64-*.tar.gz"
 
   release:
@@ -76,7 +84,7 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: actions-runner-linux-riscv64
+          name: actions-runner-linux-riscv64-${{ needs.build.outputs.RUNNER_VERSION }}
 
       - name: Get filename of the package
         id: get_filename
