@@ -15,7 +15,7 @@ jobs:
     runs-on: pioneer-box
     
     outputs:
-      version-number: ${{ steps.check-version.outputs.RUNNER_VERSION }}
+      version-number: ${{ steps.check-version.outputs.runner_version }}
 
     steps:
     - name: Checkout repository
@@ -64,12 +64,12 @@ jobs:
       run: |
         RUNNER_VERSION=$(./_layout/bin/Runner.Listener --version)
         echo "The Github runner version is $RUNNER_VERSION"
-        echo "$RUNNER_VERSION" > $GITHUB_OUTPUT
+        echo "runner_version=$RUNNER_VERSION" >> $GITHUB_OUTPUT
 
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.RUNNER_VERSION }}
+        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}
         path: "_package/actions-runner-linux-riscv64-*.tar.gz"
 
   release:
@@ -84,7 +84,8 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: actions-runner-linux-riscv64-${{ needs.build.outputs.RUNNER_VERSION }}
+          name: actions-runner-linux-riscv64-${{ needs.build.outputs.version-number }}
+          path: _package
 
       - name: Get filename of the package
         id: get_filename
@@ -106,7 +107,7 @@ jobs:
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: "_package/${{ steps.get_filename.outputs.filename }}"
