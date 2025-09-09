@@ -9,9 +9,13 @@ RISCV_NODE_URL=https://github.com/alitariq4589/nodejs-riscv/releases
 
 # When you update Node versions you must also create a new release of alpine_nodejs at that updated version.
 # Follow the instructions here: https://github.com/actions/alpine_nodejs?tab=readme-ov-file#getting-started
+<<<<<<< HEAD
 # NODE20_VERSION="20.19.4"
 
 NODE20_VERSION="20.18.1" # Only one available for riscv at https://unofficial-builds.nodejs.org/download/release
+=======
+NODE20_VERSION="20.19.5"
+>>>>>>> main
 NODE24_VERSION="24.7.0"
 
 get_abs_path() {
