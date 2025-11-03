@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    runs-on: pioneer-box
+    runs-on: RISC-V
     
     outputs:
       version-number: ${{ steps.check-version.outputs.runner_version }}
