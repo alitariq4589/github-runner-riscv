@@ -4,10 +4,15 @@ PRECACHE=$2
 
 NODE_URL=https://nodejs.org/dist
 NODE_ALPINE_URL=https://github.com/actions/alpine_nodejs/releases/download
+UNOFFICIAL_NODE_URL=https://unofficial-builds.nodejs.org/download/release
+RISCV_NODE_URL=https://github.com/alitariq4589/nodejs-riscv/releases
+
 # When you update Node versions you must also create a new release of alpine_nodejs at that updated version.
 # Follow the instructions here: https://github.com/actions/alpine_nodejs?tab=readme-ov-file#getting-started
-NODE20_VERSION="20.19.5"
-NODE24_VERSION="24.10.0"
+# NODE20_VERSION="20.19.4"
+
+NODE20_VERSION="20.18.1" # Only one available for riscv at https://unofficial-builds.nodejs.org/download/release
+NODE24_VERSION="24.7.0"
 
 get_abs_path() {
   # exploits the fact that pwd will print abs path when no args
@@ -186,4 +191,9 @@ fi
 
 if [[ "$PACKAGERUNTIME" == "linux-arm" ]]; then
     acquireExternalTool "$NODE_URL/v${NODE20_VERSION}/node-v${NODE20_VERSION}-linux-armv7l.tar.gz" node20 fix_nested_dir
+fi
+
+if [[ "$PACKAGERUNTIME" == "linux-riscv64" ]]; then
+    acquireExternalTool "$UNOFFICIAL_NODE_URL/v${NODE20_VERSION}/node-v${NODE20_VERSION}-linux-riscv64.tar.gz" node20 fix_nested_dir
+    acquireExternalTool "$RISCV_NODE_URL/download/v${NODE24_VERSION}/nodejs-${NODE24_VERSION}-riscv64-linux.tar.gz" node24 fix_nested_dir
 fi

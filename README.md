@@ -2,6 +2,84 @@
   <img src="docs/res/github-graph.png">
 </p>
 
+# RISC-V Port Docs
+
+This `main_riscv` branch is patched for building and execution on native RISC-V.
+
+## Set of changes
+
+- The Nodejs is compiled using the official docs for building on Milk-V Pioneer Box and is set to release monthly with latest tag at [this repo](https://github.com/alitariq4589/nodejs-riscv) 
+
+- The .NET version in the github actions runner source code is changed to version 8.0.101 (which can be cross-compiled for RISC-V using [dotnet-installer](https://github.com/dotnetinstaller/dotnetinstaller))
+- Following .NET packages were not produced while cross-compiling .NET for RISC-V and were not used in building github runner package for `linux-riscv64`:
+  - System.IO.FileSystem.AccessControl 
+  - System.ServiceProcess.ServiceController
+  - System.Runtime.Loader" Version
+  - System.ServiceProcess.ServiceController
+- While building the github actions runner package from this source code on RISC-V, .NET should be present inside the `_dotnetsdk` in the repository root and the `.nupkgs` produced with .NET SDK build should be present in `$HOME/packages` (see the build docs below) 
+- Since .NET release is not available for RISC-V through official .NET servers, it is built separately and is placed inside the source code 
+
+## Building on a RISC-V compute
+
+This source can be built on native RISC-V compute (`qemu-system-riscv64` or a RISC-V board)
+
+Change to the desired directory for build
+
+Clone the repo:
+
+```
+git clone -b main_riscv https://github.com/alitariq4589/github-runner-riscv.git
+```
+
+Setup the directories:
+
+```
+mkdir -p ~/packages github-runner-riscv/_dotnetsdk/8.0.101
+```
+
+Fetch dotnet:
+
+```
+wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/dotnet-sdk-8.0.101-linux-riscv64.tar.gz
+```
+
+Fetch the nupkgs in the `$HOME/packages`:
+
+```
+
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.AspNetCore.App.Runtime.linux-riscv64.8.0.1.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.AspNetCore.App.Runtime.linux-riscv64.8.0.1.symbols.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ItemTemplates.8.0.101.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ItemTemplates.8.0.101.symbols.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ProjectTemplates.8.0.8.0.101.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ProjectTemplates.8.0.8.0.101.symbols.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Web.Client.ItemTemplates.8.0.1.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Web.ItemTemplates.8.0.8.0.1.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Web.ProjectTemplates.8.0.8.0.1.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.NETCore.App.Host.linux-riscv64.8.0.1.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.NETCore.App.Runtime.linux-riscv64.8.0.1.nupkg
+wget -P ~/packages -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.NETCore.App.Runtime.linux-riscv64.8.0.1.symbols.nupkg
+```
+
+Extract the dotnet to the source code directory:
+
+```
+tar -xf dotnet-sdk-8.0.101-linux-riscv64.tar.gz -C github-runner-riscv/_dotnetsdk/8.0.101
+```
+
+Build:
+
+```
+cd github-runner-riscv/src && ./dev.sh layout Release linux-riscv64
+```
+
+Package (this will produce a tarball which will contain binaries in `github-runner-riscv/_package`):
+
+```
+cd github-runner-riscv/src && ./dev.sh package Release linux-riscv64
+```
+
+
 # GitHub Actions Runner
 
 [![Actions Status](https://github.com/actions/runner/workflows/Runner%20CI/badge.svg)](https://github.com/actions/runner/actions)
