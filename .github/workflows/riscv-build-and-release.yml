@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    runs-on: RISCV
+    runs-on: RISCV64
     
     outputs:
       version-number: ${{ steps.check-version.outputs.runner_version }}
