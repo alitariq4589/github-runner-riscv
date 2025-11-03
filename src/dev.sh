@@ -17,11 +17,7 @@ LAYOUT_DIR="$SCRIPT_DIR/../_layout"
 DOWNLOAD_DIR="$SCRIPT_DIR/../_downloads/netcore2x"
 PACKAGE_DIR="$SCRIPT_DIR/../_package"
 DOTNETSDK_ROOT="$SCRIPT_DIR/../_dotnetsdk"
-<<<<<<< HEAD
-DOTNETSDK_VERSION="8.0.415"
-=======
 DOTNETSDK_VERSION="8.0.101"
->>>>>>> ba2ce9f2 (Added RISC-V exlusive changes only)
 DOTNETSDK_INSTALLDIR="$DOTNETSDK_ROOT/$DOTNETSDK_VERSION"
 RUNNER_VERSION=$(cat runnerversion)
 
