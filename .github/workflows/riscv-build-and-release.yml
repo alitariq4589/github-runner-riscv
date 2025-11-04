@@ -28,7 +28,7 @@ jobs:
     
     - name: Download .NET and related packages
       run: |
-        
+        cd $HOME
         # Fetching Nuget packages
         mkdir packages
         cd packages
@@ -37,11 +37,11 @@ jobs:
         wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.AspNetCore.App.Runtime.linux-riscv64.8.0.1.symbols.nupkg
         wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ItemTemplates.8.0.101.nupkg
         wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ItemTemplates.8.0.101.symbols.nupkg
-        wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ProjectTemplates.8.0.101.nupkg
-        wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ProjectTemplates.8.0.101.symbols.nupkg
+        wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ProjectTemplates.8.0.8.0.101.nupkg
+        wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Common.ProjectTemplates.8.0.8.0.101.symbols.nupkg
         wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Web.Client.ItemTemplates.8.0.1.nupkg
-        wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Web.ItemTemplates.8.0.1.nupkg
-        wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Web.ProjectTemplates.8.0.1.nupkg
+        wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Web.ItemTemplates.8.0.8.0.1.nupkg
+        wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.DotNet.Web.ProjectTemplates.8.0.8.0.1.nupkg
         wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.NETCore.App.Host.linux-riscv64.8.0.1.nupkg
         wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.NETCore.App.Runtime.linux-riscv64.8.0.1.nupkg
         wget -q https://github.com/alitariq4589/dotnet-riscv/releases/download/v8.0.101/Microsoft.NETCore.App.Runtime.linux-riscv64.8.0.1.symbols.nupkg
