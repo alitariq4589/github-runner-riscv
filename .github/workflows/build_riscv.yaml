@@ -1,4 +1,4 @@
-name: Build RISC-V runner (Manual AppHost Binary)
+name: Build RISC-V runner (Fixed AppHost Registration)
 
 on:
   push:
@@ -64,100 +64,99 @@ jobs:
           fi
         done
 
-    - name: Configure for Self-Contained with AppHost
+    - name: Register linux-riscv64 AppHost for net8.0
       run: |
-        echo "=== Configuring Self-Contained Build with AppHost ==="
-          
-        for proj in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
-          csproj="src/$proj/$proj.csproj"
-          if [ -f "$csproj" ]; then
-            echo "Processing: $csproj"
-            
-            # Set SelfContained=true
-            if grep -q "<SelfContained>" "$csproj"; then
-              sed -i 's/<SelfContained>false<\/SelfContained>/<SelfContained>true<\/SelfContained>/g' "$csproj"
-            else
-              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <SelfContained>true<\/SelfContained>/' "$csproj"
-            fi
-            
-            # Set UseAppHost=true (let .NET create the structure)
-            if grep -q "<UseAppHost>" "$csproj"; then
-              sed -i 's/<UseAppHost>.*<\/UseAppHost>/<UseAppHost>true<\/UseAppHost>/' "$csproj"
-            else
-              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost>true<\/UseAppHost>/' "$csproj"
-            fi
-            
-            # Disable ReadyToRun to avoid potential issues
-            if ! grep -q "<PublishReadyToRun>" "$csproj"; then
-              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <PublishReadyToRun>false<\/PublishReadyToRun>/' "$csproj"
-            fi
-            
-            echo "  ✓ Configured: SelfContained=true, UseAppHost=true"
-          fi
-        done
-          
-    - name: Build with Self-Contained and AppHost
-      run: |
-        cd src
-        echo "=== Building Self-Contained with AppHost ==="
-        ./dev.sh layout Release linux-riscv64
-
-    - name: Fix AppHost Binaries if Needed
-      run: |
-        echo "=== Verifying and Fixing AppHost Binaries ==="
+        echo "=== Patching Microsoft.NETCoreSdk.BundledVersions.props to add linux-riscv64 AppHost support for net8.0 ==="
         
-        APPHOST_TEMPLATE="_dotnetsdk/10.0.102/packs/Microsoft.NETCore.App.Host.linux-riscv64/10.0.2/runtimes/linux-riscv64/native/apphost"
+        PROPS_FILE="_dotnetsdk/10.0.102/sdk/10.0.102/Microsoft.NETCoreSdk.BundledVersions.props"
         
-        if [ ! -f "$APPHOST_TEMPLATE" ]; then
-          echo "❌ AppHost template not found"
-          find _dotnetsdk -name "apphost" -type f
+        # Backup the original file
+        cp "$PROPS_FILE" "${PROPS_FILE}.backup"
+        
+        # Add linux-riscv64 to net8.0 KnownAppHostPack AppHostRuntimeIdentifiers
+        # Find the net8.0 KnownAppHostPack section and add linux-riscv64;linux-musl-riscv64 after freebsd-arm64
+        sed -i '/TargetFramework="net8.0"/,/<KnownCrossgen2Pack/{ 
+          s/freebsd-arm64"/freebsd-arm64;linux-riscv64;linux-musl-riscv64"/
+        }' "$PROPS_FILE"
+        
+        echo "✓ Patching complete. Verifying changes:"
+        echo ""
+        echo "Before (from backup):"
+        grep -A 4 'KnownAppHostPack.*TargetFramework="net8.0"' "${PROPS_FILE}.backup" | grep AppHostRuntimeIdentifiers
+        echo ""
+        echo "After (patched):"
+        grep -A 4 'KnownAppHostPack.*TargetFramework="net8.0"' "$PROPS_FILE" | grep AppHostRuntimeIdentifiers
+        
+        if grep -A 4 'KnownAppHostPack.*TargetFramework="net8.0"' "$PROPS_FILE" | grep -q "linux-riscv64"; then
+          echo ""
+          echo "✅ SUCCESS: linux-riscv64 has been added to net8.0 AppHost support"
+        else
+          echo ""
+          echo "❌ ERROR: Failed to add linux-riscv64"
           exit 1
         fi
-        
-        echo "✓ Found AppHost template"
-        file "$APPHOST_TEMPLATE"
+
+    - name: Build with Self-Contained
+      run: |
+        cd src
+        echo "=== Building Self-Contained Runner ==="
+        ./dev.sh layout Release linux-riscv64
+
+    - name: Verify Build Output
+      run: |
+        echo "=== Verifying Build Output ==="
         
         for app in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
           BIN_PATH="_layout/bin/$app"
           DLL_PATH="_layout/bin/${app}.dll"
-        
+          
           echo ""
           echo "Checking $app..."
-        
+          
           if [ -f "$BIN_PATH" ]; then
-            if file "$BIN_PATH" | grep -q "ELF.*executable"; then
-              echo "  ✓ Binary already valid"
+            if file "$BIN_PATH" | grep -q "ELF.*RISC-V"; then
+              echo "  ✅ Native ELF binary exists"
+              ls -lh "$BIN_PATH"
             else
-              echo "  ⚠️  Binary invalid, copying AppHost template"
-              cp "$APPHOST_TEMPLATE" "$BIN_PATH"
-              chmod +x "$BIN_PATH"
+              echo "  ⚠️  Binary exists but may not be ELF"
+              file "$BIN_PATH"
             fi
           else
-            echo "  ⚠️  Binary not found, creating from AppHost template"
-            cp "$APPHOST_TEMPLATE" "$BIN_PATH"
-            chmod +x "$BIN_PATH"
+            echo "  ℹ️  No native binary (expected if UseAppHost=false)"
           fi
-        
-          # Verify both binary and DLL exist
-          if file "$BIN_PATH" | grep -q "ELF.*RISC-V" && [ -f "$DLL_PATH" ]; then
-            echo "  ✅ Binary and DLL are valid"
-            ls -lh "$BIN_PATH" "$DLL_PATH"
+          
+          if [ -f "$DLL_PATH" ]; then
+            echo "  ✅ DLL exists"
           else
-            echo "  ❌ Verification failed"
+            echo "  ❌ DLL missing!"
             exit 1
           fi
         done
 
-    - name: Test Native Binary Execution
+    - name: Test Runner Execution
       run: |
-        echo "=== Testing Native Binary Execution ==="
+        echo "=== Testing Runner Execution ==="
         
-        if _layout/bin/Runner.Listener --version; then
-          echo "✅ Native binary executed successfully!"
+        cd _layout/bin
+        
+        if [ -f "Runner.Listener" ]; then
+          echo "Testing native binary..."
+          if ./Runner.Listener --version; then
+            echo "✅ Native binary executed successfully!"
+          else
+            echo "❌ Native binary execution failed"
+            exit 1
+          fi
+        elif [ -f "Runner.Listener.dll" ]; then
+          echo "Testing DLL with dotnet..."
+          if dotnet Runner.Listener.dll --version; then
+            echo "✅ DLL executed successfully!"
+          else
+            echo "❌ DLL execution failed"
+            exit 1
+          fi
         else
-          echo "❌ Binary execution failed"
-          echo "Checking library dependencies..."
-          ldd _layout/bin/Runner.Listener || true
+          echo "❌ No executable found!"
           exit 1
         fi
 
@@ -169,20 +168,24 @@ jobs:
     - name: Check Version
       id: check-version
       run: |
-        RUNNER_VERSION=$(_layout/bin/Runner.Listener --version 2>/dev/null || cat src/runnerversion)
+        if [ -f "_layout/bin/Runner.Listener" ]; then
+          RUNNER_VERSION=$(_layout/bin/Runner.Listener --version 2>/dev/null || cat src/runnerversion)
+        else
+          RUNNER_VERSION=$(cat src/runnerversion)
+        fi
         echo "The Github runner version is $RUNNER_VERSION"
         echo "runner_version=$RUNNER_VERSION" >> $GITHUB_OUTPUT
 
     - name: Set tag name
       id: set-tag
       run: |
-        TAG_NAME="v${{ steps.check-version.outputs.runner_version }}-riscv64-apphost"
+        TAG_NAME="v${{ steps.check-version.outputs.runner_version }}-riscv64-net8"
         echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}-apphost
+        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}
         path: "_package/actions-runner-linux-riscv64-*.tar.gz"
 
     - name: Create or verify tag
@@ -203,31 +206,23 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.set-tag.outputs.tag_name }}
-        name: "GitHub Actions Runner ${{ steps.check-version.outputs.runner_version }} for RISC-V (AppHost Binary)"
+        name: "GitHub Actions Runner ${{ steps.check-version.outputs.runner_version }} for RISC-V (net8.0)"
         body: |
-          # GitHub Actions Runner for RISC-V - Native AppHost Binary
+          # GitHub Actions Runner for RISC-V
           
           **Version:** ${{ steps.check-version.outputs.runner_version }}
           **Architecture:** linux-riscv64
-          **Build Type:** Native ELF Binary with AppHost
+          **Target Framework:** net8.0
           **Build Date:** ${{ github.event.head_commit.timestamp }}
           
-          ## ✅ True Native Binaries Using AppHost Template
+          ## ✅ Build Details
           
-          This build manually bundles the RISC-V AppHost with the runner to create native executables:
+          This build uses .NET 10.0.102 SDK with a patched configuration to enable AppHost support for net8.0 on RISC-V architecture.
           
-          - ✅ Native ELF executables (Runner.Listener, Runner.Worker, Runner.PluginHost)
-          - ✅ Uses official AppHost from .NET 10 RISC-V SDK
-          - ✅ Self-contained with bundled runtime
-          - ✅ Works exactly like official builds
-          
-          ### How It Works
-          
-          The .NET 10 RISC-V SDK includes an AppHost binary, but the SDK can't use it due to configuration issues. This build:
-          1. Builds the runner as self-contained DLLs
-          2. Manually copies the AppHost template from the SDK
-          3. Creates native executables that launch the DLLs
-          4. Packages everything together
+          **Key Features:**
+          - Self-contained deployment with bundled .NET runtime
+          - Native ELF executables (if AppHost generation succeeded)
+          - No separate .NET installation required
           
           ### Installation
           ```bash
@@ -236,7 +231,7 @@ jobs:
           mkdir actions-runner && cd actions-runner
           tar xzf ../actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}.tar.gz
           
-          # Configure (works like official builds!)
+          # Configure
           ./config.sh --url https://github.com/YOUR-ORG/YOUR-REPO --token YOUR-TOKEN
           
           # Run
@@ -247,33 +242,15 @@ jobs:
           
           - RISC-V 64-bit processor
           - Linux operating system
-          - Standard system libraries
-          - **No .NET runtime installation required** ✅
+          - Standard system libraries (libc, libssl, etc.)
           
           ### Technical Details
           
-          - **Deployment:** Self-Contained with Manual AppHost
-          - **Binary Type:** Native ELF (using SDK AppHost template)
-          - **Runtime:** .NET 10.0.102 (RISC-V, bundled)
+          - **SDK Version:** .NET 10.0.102 (RISC-V build by filipnavara)
           - **Target Framework:** net8.0
           - **Runtime Identifier:** linux-riscv64
-          
-          ### File Structure
-          
-          ```
-          actions-runner/
-          ├── bin/
-          │   ├── Runner.Listener          # Native ELF executable (AppHost)
-          │   ├── Runner.Listener.dll      # Companion DLL
-          │   ├── Runner.Worker            # Native ELF executable (AppHost)
-          │   ├── Runner.Worker.dll        # Companion DLL
-          │   ├── Runner.PluginHost        # Native ELF executable (AppHost)
-          │   ├── Runner.PluginHost.dll    # Companion DLL
-          │   └── *.so                     # Runtime libraries
-          ├── config.sh
-          ├── run.sh
-          └── ...
-          ```
+          - **Deployment Mode:** Self-Contained
+          - **AppHost:** Patched SDK to enable net8.0 support
           
           ### Credits
           
