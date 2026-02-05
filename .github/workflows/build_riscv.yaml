@@ -65,7 +65,7 @@ jobs:
         cd src
         
         # 1. Update .NET SDK version to 10.0.102
-        sed -i 's/DOTNETSDK_VERSION="8.0.415"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
+        sed -i 's/DOTNETSDK_VERSION="8.0.417"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
         
         # 2. Add linux-riscv64 to supported platforms
         sed -i 's/("$RUNTIME_ID" != '\''linux-arm'\'')/("$RUNTIME_ID" != '\''linux-arm'\'') \&\& ("$RUNTIME_ID" != '\''linux-riscv64'\'')/' dev.sh
