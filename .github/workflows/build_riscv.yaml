@@ -45,6 +45,23 @@ jobs:
         echo "$PWD/_dotnetsdk/10.0.102" >> $GITHUB_PATH
         echo "DOTNET_ROOT=$PWD/_dotnetsdk/10.0.102" >> $GITHUB_ENV
 
+    - name: Investigate SDK contents for RISC-V support
+      run: |
+        echo "=== Checking for RISC-V runtime packs ==="
+        find _dotnetsdk/10.0.102 -name "*riscv64*" -o -name "*linux-riscv64*" | head -20
+        
+        echo ""
+        echo "=== Checking packs directory ==="
+        ls -la _dotnetsdk/10.0.102/packs/ || echo "No packs directory"
+        
+        echo ""
+        echo "=== Checking shared directory ==="
+        ls -la _dotnetsdk/10.0.102/shared/ || echo "No shared directory"
+        
+        echo ""
+        echo "=== Checking for apphost ==="
+        find _dotnetsdk/10.0.102 -name "apphost" -o -name "apphost.exe" | head -10
+
     - name: Check for global.json and update if needed
       run: |
         echo "=== Checking for global.json files ==="
@@ -76,13 +93,39 @@ jobs:
         
         # 3. Add riscv64 CPU detection
         sed -i '/aarch64) RUNTIME_ID="linux-arm64";;/a\            riscv64) RUNTIME_ID="linux-riscv64";;' dev.sh
+
+    - name: Patch project files to disable UseAppHost for RISC-V
+      run: |
+        echo "=== Patching Runner.Listener.csproj ==="
         
-        echo "=== Verifying dev.sh patches ==="
-        echo "DOTNETSDK_VERSION:"
-        grep "DOTNETSDK_VERSION=" dev.sh
-        echo ""
-        echo "RISC-V support:"
-        grep -A 2 "linux-riscv64" dev.sh
+        # Add UseAppHost=false for RISC-V builds to work around missing apphost
+        # This creates a dotnet-runnable assembly instead of a native executable
+        cd src/Runner.Listener
+        
+        # Check if already has UseAppHost
+        if grep -q "UseAppHost" Runner.Listener.csproj; then
+          echo "UseAppHost already configured"
+        else
+          # Add UseAppHost condition for RISC-V
+          sed -i '/<PropertyGroup>/a\    <UseAppHost Condition="'\''$(PackageRuntime)'\'' == '\''linux-riscv64'\''">false</UseAppHost>' Runner.Listener.csproj
+        fi
+        
+        echo "Updated Runner.Listener.csproj:"
+        grep -A 5 -B 5 "UseAppHost" Runner.Listener.csproj || echo "No UseAppHost found"
+        
+        cd ../..
+        
+        # Do the same for Runner.Worker and Runner.PluginHost
+        for proj in "Runner.Worker" "Runner.PluginHost"; do
+          if [ -f "src/$proj/$proj.csproj" ]; then
+            echo "=== Patching $proj.csproj ==="
+            cd "src/$proj"
+            if ! grep -q "UseAppHost" "$proj.csproj"; then
+              sed -i '/<PropertyGroup>/a\    <UseAppHost Condition="'\''$(PackageRuntime)'\'' == '\''linux-riscv64'\''">false</UseAppHost>' "$proj.csproj"
+            fi
+            cd ../..
+          fi
+        done
 
     - name: Verify .NET installation
       run: |
@@ -91,13 +134,6 @@ jobs:
         echo ""
         echo "=== .NET Version ==="
         dotnet --version
-
-    - name: Check what externals.sh is trying to download
-      run: |
-        echo "=== Checking externals.sh for RISC-V downloads ==="
-        if [ -f "src/Misc/externals.sh" ]; then
-          cat src/Misc/externals.sh
-        fi
 
     - name: Restore and Build
       run: |
