@@ -102,24 +102,25 @@ jobs:
     - name: Disable UseAppHost for RISC-V builds
       run: |
         echo "=== Disabling UseAppHost for RISC-V (SDK limitation workaround) ==="
-        
-        # Add UseAppHost=false for all executable projects
+          
         for proj in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
           csproj="src/$proj/$proj.csproj"
           if [ -f "$csproj" ]; then
             echo "Processing: $csproj"
             
-            # Add UseAppHost and SelfContained properties if not present
+            # Replace SelfContained true with false
+            sed -i 's/<SelfContained>true<\/SelfContained>/<SelfContained>false<\/SelfContained>/g' "$csproj"
+            
+            # Add UseAppHost if not present
             if ! grep -q "UseAppHost" "$csproj"; then
-              # Find the first PropertyGroup and add both properties after it
-              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost>false<\/UseAppHost>\n    <SelfContained>false<\/SelfContained>/'    "$csproj"
-              echo "  ✓ Added UseAppHost=false and SelfContained=false"
-            else
-              echo "  - UseAppHost already configured"
+              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost>false<\/UseAppHost>/' "$csproj"
+              echo "  ✓ Added UseAppHost=false"
             fi
             
-            # Show the result
-            grep -A 3 "UseAppHost\|SelfContained" "$csproj" || true
+            echo "  ✓ Modified SelfContained to false"
+            
+            # Verify changes
+            grep -E "UseAppHost|SelfContained" "$csproj" | head -5
           fi
         done
 
