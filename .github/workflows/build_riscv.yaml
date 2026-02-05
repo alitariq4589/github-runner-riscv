@@ -1,0 +1,124 @@
+## If you need nodejs for running latest github actions pipeline, you can get nodejs for RISC-V here: https://github.com/alitariq4589/nodejs-riscv/releases ##
+
+name: Build RISC-V runner
+
+on:
+  push:
+    branches:
+      - riscv_dotnet10
+    tags:
+      - '*_riscv'  # Tags patched for RISC-V
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: RISCV64
+    
+    outputs:
+      version-number: ${{ steps.check-version.outputs.runner_version }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y liblttng-ust-dev libkrb5-dev zlib1g-dev libicu-dev libssl-dev libcurl4-openssl-dev libelf-dev libunwind-dev pkg-config wget tar libatomic1
+    
+    - name: Download .NET 10 SDK
+      run: |
+        cd $HOME
+        # Download .NET 10 SDK for RISC-V (glibc variant)
+        # Option 1: From your releases
+        wget -q -O dotnet.tar.gz https://github.com/YOUR_USERNAME/YOUR_REPO/releases/download/10.0.102/dotnet-sdk-10.0.102-linux-riscv64.tar.gz
+        
+        # Option 2: If you want to use artifacts from the build workflow, see alternative below
+        
+        mkdir -p _dotnetsdk/10.0.102
+        tar -xf dotnet.tar.gz -C _dotnetsdk/10.0.102
+        echo "$HOME/_dotnetsdk/10.0.102" >> $GITHUB_PATH
+        echo "DOTNET_ROOT=$HOME/_dotnetsdk/10.0.102" >> $GITHUB_ENV
+
+    - name: Configure NuGet sources
+      run: |
+        # Clear any existing NuGet sources that might cause conflicts
+        dotnet nuget list source || true
+        
+        # Add official NuGet source
+        dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org || true
+        
+        # If you have custom NuGet packages, you can add a local source
+        # mkdir -p $HOME/packages
+        # dotnet nuget add source $HOME/packages -n local || true
+
+    - name: Verify .NET installation
+      run: |
+        dotnet --info
+        dotnet --version
+        dotnet --list-runtimes
+        dotnet --list-sdks
+
+    - name: Restore and Build
+      run: |
+        cd src
+        ./dev.sh layout Release linux-riscv64
+
+    - name: Package
+      run: |
+        cd src && ./dev.sh package Release linux-riscv64
+    
+    - name: Check Version
+      id: check-version
+      run: |
+        RUNNER_VERSION=$(./_layout/bin/Runner.Listener --version)
+        echo "The Github runner version is $RUNNER_VERSION"
+        echo "runner_version=$RUNNER_VERSION" >> $GITHUB_OUTPUT
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}
+        path: "_package/actions-runner-linux-riscv64-*.tar.gz"
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: actions-runner-linux-riscv64-${{ needs.build.outputs.version-number }}
+          path: _package
+
+      - name: Get filename of the package
+        id: get_filename
+        run: |
+          filename=$(basename $(ls -1 _package/actions-runner-linux-riscv64-*.tar.gz))
+          echo "filename=$filename" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: "_package/${{ steps.get_filename.outputs.filename }}"
+          asset_name: ${{ steps.get_filename.outputs.filename }}
+          asset_content_type: application/gzip
