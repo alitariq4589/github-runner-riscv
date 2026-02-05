@@ -99,6 +99,30 @@ jobs:
           fi
         done
 
+    - name: Disable UseAppHost for RISC-V builds
+      run: |
+        echo "=== Disabling UseAppHost for RISC-V (SDK limitation workaround) ==="
+        
+        # Add UseAppHost=false for all executable projects
+        for proj in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
+          csproj="src/$proj/$proj.csproj"
+          if [ -f "$csproj" ]; then
+            echo "Processing: $csproj"
+            
+            # Add UseAppHost property if not present
+            if ! grep -q "UseAppHost" "$csproj"; then
+              # Find the first PropertyGroup and add UseAppHost after it
+              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost Condition="'\''$(PackageRuntime)'\'' == '\''linux-riscv64'\''">false<\/UseAppHost>/' "$csproj"
+              echo "  ✓ Added UseAppHost=false for linux-riscv64"
+            else
+              echo "  - UseAppHost already configured"
+            fi
+            
+            # Show the result
+            grep -A 2 "UseAppHost" "$csproj" || true
+          fi
+        done
+
     - name: Verify .NET installation
       run: |
         echo "=== .NET Info ==="
@@ -117,7 +141,8 @@ jobs:
     - name: Check Version
       id: check-version
       run: |
-        RUNNER_VERSION=$(./_layout/bin/Runner.Listener --version)
+        # Since we're using UseAppHost=false, we need to run with dotnet
+        RUNNER_VERSION=$(dotnet _layout/bin/Runner.Listener.dll --version 2>/dev/null || cat runnerversion)
         echo "The Github runner version is $RUNNER_VERSION"
         echo "runner_version=$RUNNER_VERSION" >> $GITHUB_OUTPUT
 
