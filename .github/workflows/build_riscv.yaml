@@ -5,7 +5,7 @@ name: Build RISC-V runner
 on:
   push:
     branches:
-      - main_riscv
+      - riscv_dotnet10
     tags:
       - '*_riscv'
   workflow_dispatch:
