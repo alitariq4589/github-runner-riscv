@@ -35,7 +35,46 @@ jobs:
         echo "10.0.102" > _dotnetsdk/10.0.102/.10.0.102
         echo "$PWD/_dotnetsdk/10.0.102" >> $GITHUB_PATH
         echo "DOTNET_ROOT=$PWD/_dotnetsdk/10.0.102" >> $GITHUB_ENV
-
+    - name: Create net8.0 runtime packs from net10.0
+      run: |
+        echo "=== Creating net8.0 runtime packs for RISC-V ==="
+        
+        SDK_ROOT="_dotnetsdk/10.0.102"
+        PACKS_DIR="$SDK_ROOT/packs"
+        
+        # Find the net10.0 runtime pack version
+        NET10_RUNTIME_VERSION=$(ls -1 "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/" | head -1)
+        NET10_HOST_VERSION=$(ls -1 "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/" | head -1)
+        
+        echo "Found net10.0 runtime version: $NET10_RUNTIME_VERSION"
+        echo "Found net10.0 host version: $NET10_HOST_VERSION"
+        
+        # Create net8.0 runtime pack (version 8.0.11 as expected by net8.0 projects)
+        NET8_RUNTIME_VERSION="8.0.11"
+        NET8_HOST_VERSION="8.0.11"
+        
+        # Copy runtime pack
+        if [ ! -d "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_RUNTIME_VERSION" ]; then
+          echo "Creating Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_RUNTIME_VERSION"
+          cp -r "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/$NET10_RUNTIME_VERSION" \
+                "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_RUNTIME_VERSION"
+        fi
+        
+        # Copy host pack
+        if [ ! -d "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/$NET8_HOST_VERSION" ]; then
+          echo "Creating Microsoft.NETCore.App.Host.linux-riscv64/$NET8_HOST_VERSION"
+          cp -r "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/$NET10_HOST_VERSION" \
+                "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/$NET8_HOST_VERSION"
+        fi
+        
+        # Verify the packs exist
+        echo ""
+        echo "Verifying created packs:"
+        ls -la "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/"
+        ls -la "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/"
+        
+        echo ""
+        echo "✅ net8.0 runtime packs created successfully"
     - name: Check for global.json and update if needed
       run: |
         echo "=== Checking for global.json files ==="
