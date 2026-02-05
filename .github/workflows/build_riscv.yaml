@@ -123,11 +123,21 @@ jobs:
             grep -E "UseAppHost|SelfContained" "$csproj" | head -5
           fi
         done
-
-    - name: Verify .NET installation
+    - name: Patch dev.sh to handle DLL files (no AppHost)
       run: |
-        echo "=== .NET Info ==="
-        dotnet --info
+        cd src
+          
+        # Modify the chmod section in the layout function to handle .dll files
+        sed -i '/chmod +x.*Runner\.Listener/d' dev.sh
+        sed -i '/chmod +x.*Runner\.Worker/d' dev.sh
+        sed -i '/chmod +x.*Runner\.PluginHost/d' dev.sh
+          
+        # Add conditional chmod that checks if the file exists before chmod
+        sed -i '/chmod +x.*installdependencies.sh/i\        [ -f "${LAYOUT_DIR}/bin/Runner.Listener" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.Listener" ||      true\n        [ -f "${LAYOUT_DIR}/bin/Runner.Worker" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.Worker" || true\n        [ -f "${LAYOUT_DIR}/bin/Runner.      PluginHost" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.PluginHost" || true' dev.sh
+        - name: Verify .NET installation
+          run: |
+            echo "=== .NET Info ==="
+            dotnet --info
 
     - name: Restore and Build
       run: |
