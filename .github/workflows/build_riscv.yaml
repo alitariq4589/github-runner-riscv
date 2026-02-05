@@ -1,7 +1,3 @@
-## If you need nodejs for running latest github actions pipeline, you can get nodejs for RISC-V here: 
-## https://github.com/alitariq4589/nodejs-riscv/releases
-## Latest: https://github.com/alitariq4589/nodejs-riscv/releases/download/v24.7.0/nodejs-24.7.0-riscv64-linux.tar.gz
-
 name: Build RISC-V runner
 
 on:
@@ -102,7 +98,7 @@ jobs:
     - name: Disable UseAppHost for RISC-V builds
       run: |
         echo "=== Disabling UseAppHost for RISC-V (SDK limitation workaround) ==="
-          
+        
         for proj in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
           csproj="src/$proj/$proj.csproj"
           if [ -f "$csproj" ]; then
@@ -123,17 +119,27 @@ jobs:
             grep -E "UseAppHost|SelfContained" "$csproj" | head -5
           fi
         done
+
     - name: Patch dev.sh to handle DLL files (no AppHost)
       run: |
         cd src
-          
-        # Modify the chmod section in the layout function to handle .dll files
-        sed -i '/chmod +x.*Runner\.Listener/d' dev.sh
-        sed -i '/chmod +x.*Runner\.Worker/d' dev.sh
-        sed -i '/chmod +x.*Runner\.PluginHost/d' dev.sh
-          
-        # Add conditional chmod that checks if the file exists before chmod
-        sed -i '/chmod +x.*installdependencies.sh/i\        [ -f "${LAYOUT_DIR}/bin/Runner.Listener" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.Listener" ||      true\n        [ -f "${LAYOUT_DIR}/bin/Runner.Worker" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.Worker" || true\n        [ -f "${LAYOUT_DIR}/bin/Runner.      PluginHost" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.PluginHost" || true' dev.sh
+        
+        # Make chmod commands conditional - only run if files exist
+        sed -i 's/chmod +x "\${LAYOUT_DIR}\/bin\/Runner\.Listener"/[ -f "\${LAYOUT_DIR}\/bin\/Runner.Listener" ] \&\& chmod +x "\${LAYOUT_DIR}\/bin\/Runner.Listener" || true/' dev.sh
+        sed -i 's/chmod +x "\${LAYOUT_DIR}\/bin\/Runner\.Worker"/[ -f "\${LAYOUT_DIR}\/bin\/Runner.Worker" ] \&\& chmod +x "\${LAYOUT_DIR}\/bin\/Runner.Worker" || true/' dev.sh
+        sed -i 's/chmod +x "\${LAYOUT_DIR}\/bin\/Runner\.PluginHost"/[ -f "\${LAYOUT_DIR}\/bin\/Runner.PluginHost" ] \&\& chmod +x "\${LAYOUT_DIR}\/bin\/Runner.PluginHost" || true/' dev.sh
+        
+        echo "✓ Made chmod commands conditional"
+
+    - name: Patch dev.sh package function to handle DLL files
+      run: |
+        cd src
+        
+        # Replace the runner_ver line in package() function to use dotnet for .dll files
+        sed -i 's|runner_ver=$("\${LAYOUT_DIR}/bin/Runner.Listener" --version)|runner_ver=$(dotnet "\${LAYOUT_DIR}/bin/Runner.Listener.dll" --version 2>/dev/null)|' dev.sh
+        
+        echo "✓ Patched package() function to use dotnet for .dll files"
+
     - name: Verify .NET installation
       run: |
         echo "=== .NET Info ==="
@@ -153,7 +159,7 @@ jobs:
       id: check-version
       run: |
         # Since we're using UseAppHost=false, we need to run with dotnet
-        RUNNER_VERSION=$(dotnet _layout/bin/Runner.Listener.dll --version 2>/dev/null || cat runnerversion)
+        RUNNER_VERSION=$(dotnet _layout/bin/Runner.Listener.dll --version 2>/dev/null || cat src/runnerversion)
         echo "The Github runner version is $RUNNER_VERSION"
         echo "runner_version=$RUNNER_VERSION" >> $GITHUB_OUTPUT
 
