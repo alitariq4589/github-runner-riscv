@@ -42,36 +42,44 @@ jobs:
         SDK_ROOT="_dotnetsdk/10.0.102"
         PACKS_DIR="$SDK_ROOT/packs"
         
-        # Find the net10.0 runtime pack version
+        # Find the net10.0 versions
         NET10_RUNTIME_VERSION=$(ls -1 "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/" | head -1)
         NET10_HOST_VERSION=$(ls -1 "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/" | head -1)
+        NET10_ASPNET_VERSION=$(ls -1 "$PACKS_DIR/Microsoft.AspNetCore.App.Runtime.linux-riscv64/" | head -1)
         
         echo "Found net10.0 runtime version: $NET10_RUNTIME_VERSION"
         echo "Found net10.0 host version: $NET10_HOST_VERSION"
+        echo "Found net10.0 aspnet version: $NET10_ASPNET_VERSION"
         
-        # Create net8.0 runtime pack (version 8.0.11 as expected by net8.0 projects)
-        NET8_RUNTIME_VERSION="8.0.11"
-        NET8_HOST_VERSION="8.0.11"
+        # Use version 8.0.23 to match SDK expectations (check LatestRuntimeFrameworkVersion in props)
+        NET8_VERSION="8.0.23"
         
-        # Copy runtime pack
-        if [ ! -d "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_RUNTIME_VERSION" ]; then
-          echo "Creating Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_RUNTIME_VERSION"
+        # Copy NETCore.App runtime pack
+        if [ ! -d "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_VERSION" ]; then
+          echo "Creating Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_VERSION"
           cp -r "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/$NET10_RUNTIME_VERSION" \
-                "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_RUNTIME_VERSION"
+                "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/$NET8_VERSION"
         fi
         
-        # Copy host pack
-        if [ ! -d "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/$NET8_HOST_VERSION" ]; then
-          echo "Creating Microsoft.NETCore.App.Host.linux-riscv64/$NET8_HOST_VERSION"
+        # Copy NETCore.App host pack
+        if [ ! -d "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/$NET8_VERSION" ]; then
+          echo "Creating Microsoft.NETCore.App.Host.linux-riscv64/$NET8_VERSION"
           cp -r "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/$NET10_HOST_VERSION" \
-                "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/$NET8_HOST_VERSION"
+                "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/$NET8_VERSION"
         fi
         
-        # Verify the packs exist
+        # Copy AspNetCore runtime pack
+        if [ ! -d "$PACKS_DIR/Microsoft.AspNetCore.App.Runtime.linux-riscv64/$NET8_VERSION" ]; then
+          echo "Creating Microsoft.AspNetCore.App.Runtime.linux-riscv64/$NET8_VERSION"
+          cp -r "$PACKS_DIR/Microsoft.AspNetCore.App.Runtime.linux-riscv64/$NET10_ASPNET_VERSION" \
+                "$PACKS_DIR/Microsoft.AspNetCore.App.Runtime.linux-riscv64/$NET8_VERSION"
+        fi
+        
         echo ""
         echo "Verifying created packs:"
-        ls -la "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/"
-        ls -la "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/"
+        ls -la "$PACKS_DIR/Microsoft.NETCore.App.Runtime.linux-riscv64/" || true
+        ls -la "$PACKS_DIR/Microsoft.NETCore.App.Host.linux-riscv64/" || true
+        ls -la "$PACKS_DIR/Microsoft.AspNetCore.App.Runtime.linux-riscv64/" || true
         
         echo ""
         echo "✅ net8.0 runtime packs created successfully"
