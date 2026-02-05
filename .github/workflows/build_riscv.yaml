@@ -3,17 +3,18 @@ name: Build RISC-V runner
 on:
   push:
     branches:
-      - riscv_dotnet10_build
-    tags:
-      - '*_riscv'
+      - riscv_dotnet10
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: RISCV64
+    permissions:
+      contents: write
     
     outputs:
       version-number: ${{ steps.check-version.outputs.runner_version }}
+      tag-name: ${{ steps.set-tag.outputs.tag_name }}
 
     steps:
     - name: Checkout repository
@@ -64,7 +65,7 @@ jobs:
         cd src
         
         # 1. Update .NET SDK version to 10.0.102
-        sed -i 's/DOTNETSDK_VERSION="8.0.417"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
+        sed -i 's/DOTNETSDK_VERSION="8.0.415"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
         
         # 2. Add linux-riscv64 to supported platforms
         sed -i 's/("$RUNTIME_ID" != '\''linux-arm'\'')/("$RUNTIME_ID" != '\''linux-arm'\'') \&\& ("$RUNTIME_ID" != '\''linux-riscv64'\'')/' dev.sh
@@ -163,50 +164,92 @@ jobs:
         echo "The Github runner version is $RUNNER_VERSION"
         echo "runner_version=$RUNNER_VERSION" >> $GITHUB_OUTPUT
 
-    - name: Upload
+    - name: Set tag name
+      id: set-tag
+      run: |
+        TAG_NAME="v${{ steps.check-version.outputs.runner_version }}-riscv64"
+        echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}
         path: "_package/actions-runner-linux-riscv64-*.tar.gz"
 
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
+    - name: Create or verify tag
+      run: |
+        TAG="${{ steps.set-tag.outputs.tag_name }}"
 
-    permissions:
-      contents: write
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
 
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: actions-runner-linux-riscv64-${{ needs.build.outputs.version-number }}
-          path: _package
+        if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+          echo "✅ Tag $TAG already exists. Will update release if needed." 
+        else
+          echo "🆕 Tag $TAG does not exist. Creating and pushing..."
+          git tag "$TAG"
+          git push origin "$TAG"
+        fi
 
-      - name: Get filename of the package
-        id: get_filename
-        run: |
-          filename=$(basename $(ls -1 _package/actions-runner-linux-riscv64-*.tar.gz))
-          echo "filename=$filename" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: "_package/${{ steps.get_filename.outputs.filename }}"
-          asset_name: ${{ steps.get_filename.outputs.filename }}
-          asset_content_type: application/gzip
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.set-tag.outputs.tag_name }}
+        name: "GitHub Actions Runner ${{ steps.check-version.outputs.runner_version }} for RISC-V"
+        body: |
+          # GitHub Actions Runner for RISC-V (Unofficial Port)
+          
+          **Version:** ${{ steps.check-version.outputs.runner_version }}
+          **Architecture:** linux-riscv64
+          **Build Date:** ${{ github.event.head_commit.timestamp }}
+          
+          ## ⚠️ Important: This is an unofficial RISC-V port
+          
+          ### Key Differences from Official Build
+          
+          This build uses **non-self-contained deployment** and requires .NET 10 runtime:
+          
+          - **Uses .NET 10.0.102** (unofficial RISC-V port) instead of .NET 8.0.415
+          - **Produces .NET assemblies** (.dll files) instead of native executables
+          - **Requires .NET 10 runtime** to be installed on the target system
+          
+          ### Runtime Requirements
+          
+          Install .NET 10 RISC-V runtime before using:
+          ```bash
+          wget https://github.com/filipnavara/dotnet-riscv/releases/download/10.0.102/dotnet-sdk-10.0.102-linux-riscv64.tar.gz
+          sudo mkdir -p /opt/dotnet
+          sudo tar -xzf dotnet-sdk-10.0.102-linux-riscv64.tar.gz -C /opt/dotnet
+          export PATH=$PATH:/opt/dotnet
+          export DOTNET_ROOT=/opt/dotnet
+          ```
+          
+          ### Installation
+          ```bash
+          # Download and extract
+          wget https://github.com/${{ github.repository }}/releases/download/${{ steps.set-tag.outputs.tag_name }}/actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}.tar.gz
+          mkdir actions-runner && cd actions-runner
+          tar xzf ../actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}.tar.gz
+          
+          # Configure
+          ./config.sh --url https://github.com/YOUR-ORG/YOUR-REPO --token YOUR-TOKEN
+          
+          # Run
+          ./run.sh
+          ```
+          
+          ### Build Configuration
+          
+          - **UseAppHost:** false (assemblies instead of native executables)
+          - **SelfContained:** false (requires runtime installation)
+          - **Target Framework:** net8.0
+          - **Runtime Identifier:** linux-riscv64
+          
+          ### Credits
+          
+          - Original GitHub Actions Runner: https://github.com/actions/runner
+          - .NET RISC-V Port: https://github.com/filipnavara/dotnet-riscv
+        files: _package/actions-runner-linux-riscv64-*.tar.gz
+        draft: false
+        prerelease: false
+        fail_on_unmatched_files: true
