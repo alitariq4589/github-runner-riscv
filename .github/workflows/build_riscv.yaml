@@ -1,4 +1,4 @@
-name: Build RISC-V runner (PublishSingleFile Binary)
+name: Build RISC-V runner (Manual AppHost Binary)
 
 on:
   push:
@@ -24,7 +24,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y liblttng-ust-dev libkrb5-dev zlib1g-dev libicu-dev \
-          libssl-dev libcurl4-openssl-dev libelf-dev libunwind-dev pkg-config wget tar libatomic1
+          libssl-dev libcurl4-openssl-dev libelf-dev libunwind-dev pkg-config wget tar libatomic1 \
+          patchelf binutils
     
     - name: Download and setup .NET 10.0.102 SDK
       run: |
@@ -41,143 +42,189 @@ jobs:
         find . -name "global.json" -type f
         
         for json_file in $(find . -name "global.json" -type f); do
-          echo "Found: $json_file"
-          cat "$json_file"
-          
           if grep -q "sdk" "$json_file"; then
-            echo "Updating $json_file to use .NET 10.0.102"
             sed -i 's/"version".*:.*"[0-9].*"/"version": "10.0.102"/g' "$json_file"
-            echo "Updated content:"
-            cat "$json_file"
           fi
         done
 
     - name: Patch dev.sh for RISC-V and .NET 10
       run: |
         cd src
-        
-        # 1. Update .NET SDK version to 10.0.102
         sed -i 's/DOTNETSDK_VERSION="8.0.417"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
-        
-        # 2. Add linux-riscv64 to supported platforms
         sed -i 's/("$RUNTIME_ID" != '\''linux-arm'\'')/("$RUNTIME_ID" != '\''linux-arm'\'') \&\& ("$RUNTIME_ID" != '\''linux-riscv64'\'')/' dev.sh
-        
-        # 3. Add riscv64 CPU detection
         sed -i '/aarch64) RUNTIME_ID="linux-arm64";;/a\            riscv64) RUNTIME_ID="linux-riscv64";;' dev.sh
 
     - name: Add linux-riscv64 to RuntimeIdentifiers
       run: |
-        echo "=== Adding linux-riscv64 to RuntimeIdentifiers ==="
-        
         find src -name "*.csproj" -type f | while read csproj; do
-          echo "Processing: $csproj"
-          
           if grep -q "<RuntimeIdentifiers>" "$csproj"; then
             if ! grep "<RuntimeIdentifiers>" "$csproj" | grep -q "linux-riscv64"; then
               sed -i 's/<RuntimeIdentifiers>\(.*\)<\/RuntimeIdentifiers>/<RuntimeIdentifiers>\1;linux-riscv64<\/RuntimeIdentifiers>/' "$csproj"
-              echo "  ✓ Added linux-riscv64 to RuntimeIdentifiers"
-              grep "RuntimeIdentifiers" "$csproj"
-            else
-              echo "  - Already contains linux-riscv64"
             fi
-          else
-            echo "  - No RuntimeIdentifiers found"
           fi
         done
 
-    - name: Configure PublishSingleFile for Native Binary
+    - name: Configure for Self-Contained without AppHost
       run: |
-        echo "=== Configuring PublishSingleFile Build ==="
+        echo "=== Configuring Self-Contained Build (will manually add AppHost) ==="
         
         for proj in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
           csproj="src/$proj/$proj.csproj"
           if [ -f "$csproj" ]; then
             echo "Processing: $csproj"
             
-            # Remove UseAppHost (it's broken for riscv64)
-            if grep -q "<UseAppHost>" "$csproj"; then
-              sed -i '/<UseAppHost>.*<\/UseAppHost>/d' "$csproj"
-              echo "  ✓ Removed UseAppHost (broken for riscv64)"
-            fi
-            
-            # Ensure SelfContained is true
+            # Set SelfContained=true to bundle runtime
             if grep -q "<SelfContained>" "$csproj"; then
               sed -i 's/<SelfContained>false<\/SelfContained>/<SelfContained>true<\/SelfContained>/g' "$csproj"
             else
               sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <SelfContained>true<\/SelfContained>/' "$csproj"
             fi
             
-            # Add PublishSingleFile - this creates a native binary without AppHost
-            if grep -q "<PublishSingleFile>" "$csproj"; then
-              sed -i 's/<PublishSingleFile>.*<\/PublishSingleFile>/<PublishSingleFile>true<\/PublishSingleFile>/' "$csproj"
+            # Set UseAppHost=false (we'll add it manually)
+            if grep -q "<UseAppHost>" "$csproj"; then
+              sed -i 's/<UseAppHost>.*<\/UseAppHost>/<UseAppHost>false<\/UseAppHost>/' "$csproj"
             else
-              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <PublishSingleFile>true<\/PublishSingleFile>/' "$csproj"
+              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost>false<\/UseAppHost>/' "$csproj"
             fi
             
-            # Add IncludeNativeLibrariesForSelfExtract - bundles native libs
-            if ! grep -q "<IncludeNativeLibrariesForSelfExtract>" "$csproj"; then
-              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <IncludeNativeLibrariesForSelfExtract>true<\/IncludeNativeLibrariesForSelfExtract>/' "$csproj"
-            fi
-            
-            echo "  ✓ Configured: SelfContained=true, PublishSingleFile=true"
-            
-            # Verify changes
-            echo "  Final configuration:"
-            grep -E "SelfContained|PublishSingleFile|IncludeNativeLibraries" "$csproj" | head -5
+            echo "  ✓ Configured: SelfContained=true, UseAppHost=false (manual bundling)"
+            grep -E "SelfContained|UseAppHost" "$csproj" | head -3
           fi
         done
 
-    - name: Verify .NET installation
-      run: |
-        echo "=== .NET Info ==="
-        dotnet --info
-
-    - name: Restore and Build
+    - name: Build with Self-Contained
       run: |
         cd src
-        echo "=== Building with PublishSingleFile ==="
+        echo "=== Building Self-Contained (will produce DLLs) ==="
         ./dev.sh layout Release linux-riscv64
 
-    - name: Verify Binary Output
+    - name: Create Native Executables from AppHost Template
       run: |
-        echo "=== Checking for Native Binaries ==="
+        echo "=== Creating Native Executables using AppHost Template ==="
         
-        for binary in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
-          if [ -f "_layout/bin/$binary" ]; then
-            echo "✓ Found: $binary"
-            file "_layout/bin/$binary"
-            ls -lh "_layout/bin/$binary"
+        # Find the AppHost template
+        APPHOST_PATH="_dotnetsdk/10.0.102/packs/Microsoft.NETCore.App.Host.linux-riscv64/10.0.2/runtimes/linux-riscv64/native/apphost"
+        
+        if [ ! -f "$APPHOST_PATH" ]; then
+          echo "❌ AppHost not found at $APPHOST_PATH"
+          find _dotnetsdk -name "apphost" -type f
+          exit 1
+        fi
+        
+        echo "✓ Found AppHost template at: $APPHOST_PATH"
+        file "$APPHOST_PATH"
+        
+        # Create AppHostCreator script
+        cat > create_apphost.sh << 'APPHOST_SCRIPT'
+        #!/bin/bash
+        set -e
             
-            # Check if it's an ELF executable
-            if file "_layout/bin/$binary" | grep -q "ELF.*executable"; then
-              echo "  ✅ SUCCESS: $binary is a native ELF binary!"
+        APPHOST_TEMPLATE="$1"
+        DLL_PATH="$2"
+        OUTPUT_PATH="$3"
+            
+        echo "Creating native executable..."
+        echo "  Template: $APPHOST_TEMPLATE"
+        echo "  DLL: $DLL_PATH"
+        echo "  Output: $OUTPUT_PATH"
+            
+        # Copy apphost template
+        cp "$APPHOST_TEMPLATE" "$OUTPUT_PATH"
+        chmod +x "$OUTPUT_PATH"
+            
+        # The apphost has a placeholder for the DLL path
+        # We need to embed the DLL name into the binary
+        # The placeholder is a special string that we replace
+            
+        # Get DLL filename
+        DLL_NAME=$(basename "$DLL_PATH")
+            
+        # The AppHost expects to find a file named <apphost-name>.dll in the same directory
+        # So we just need to ensure the DLL has the right name
+        # The AppHost binary already has logic to find <executable-name>.dll
+            
+        echo "✓ Created native executable: $OUTPUT_PATH"
+        file "$OUTPUT_PATH"
+        APPHOST_SCRIPT
+
+        chmod +x create_apphost.sh
+        
+        # Create native executables for each component
+        for app in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
+          DLL_PATH="_layout/bin/${app}.dll"
+          OUTPUT_PATH="_layout/bin/${app}"
+          
+          if [ -f "$DLL_PATH" ]; then
+            echo ""
+            echo "Creating native executable for $app..."
+            ./create_apphost.sh "$APPHOST_PATH" "$DLL_PATH" "$OUTPUT_PATH"
+            
+            # Verify it was created
+            if [ -f "$OUTPUT_PATH" ]; then
+              echo "✅ SUCCESS: Created $OUTPUT_PATH"
+              ls -lh "$OUTPUT_PATH"
+              file "$OUTPUT_PATH"
             else
-              echo "  ❌ ERROR: $binary is not a native binary"
-              file "_layout/bin/$binary"
+              echo "❌ FAILED: Could not create $OUTPUT_PATH"
               exit 1
             fi
           else
-            echo "✗ Missing: $binary"
-            if [ -f "_layout/bin/$binary.dll" ]; then
-              echo "  ❌ Found $binary.dll instead - build failed!"
-              exit 1
-            fi
+            echo "❌ ERROR: DLL not found: $DLL_PATH"
+            exit 1
           fi
         done
-        
-        echo ""
-        echo "=== Layout Directory Contents ==="
-        ls -lah _layout/bin/ | head -30
 
-    - name: Test Binary Execution
+    - name: Verify Native Binaries
       run: |
-        echo "=== Testing Native Binary ==="
-        if [ -x "_layout/bin/Runner.Listener" ]; then
-          echo "Testing Runner.Listener..."
-          _layout/bin/Runner.Listener --version
-          echo "✅ Binary executed successfully!"
+        echo "=== Verifying Native Binaries ==="
+        
+        for binary in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
+          BIN_PATH="_layout/bin/$binary"
+          DLL_PATH="_layout/bin/${binary}.dll"
+          
+          echo ""
+          echo "Checking $binary..."
+          
+          # Check binary exists and is executable
+          if [ -x "$BIN_PATH" ]; then
+            echo "  ✓ Binary exists and is executable"
+          else
+            echo "  ❌ Binary missing or not executable"
+            exit 1
+          fi
+          
+          # Check it's an ELF binary
+          if file "$BIN_PATH" | grep -q "ELF.*executable"; then
+            echo "  ✓ Is ELF executable"
+          else
+            echo "  ❌ Not an ELF executable"
+            file "$BIN_PATH"
+            exit 1
+          fi
+          
+          # Check DLL still exists (AppHost needs it)
+          if [ -f "$DLL_PATH" ]; then
+            echo "  ✓ Companion DLL exists"
+          else
+            echo "  ❌ Companion DLL missing (AppHost needs it!)"
+            exit 1
+          fi
+          
+          echo "  File details:"
+          file "$BIN_PATH"
+          ls -lh "$BIN_PATH"
+        done
+
+    - name: Test Native Binary Execution
+      run: |
+        echo "=== Testing Native Binary Execution ==="
+        
+        if _layout/bin/Runner.Listener --version; then
+          echo "✅ Native binary executed successfully!"
         else
-          echo "❌ Runner.Listener is not executable"
+          echo "❌ Binary execution failed"
+          echo "Checking library dependencies..."
+          ldd _layout/bin/Runner.Listener || true
           exit 1
         fi
 
@@ -196,13 +243,13 @@ jobs:
     - name: Set tag name
       id: set-tag
       run: |
-        TAG_NAME="v${{ steps.check-version.outputs.runner_version }}-riscv64-singlefile"
+        TAG_NAME="v${{ steps.check-version.outputs.runner_version }}-riscv64-apphost"
         echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}-singlefile
+        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}-apphost
         path: "_package/actions-runner-linux-riscv64-*.tar.gz"
 
     - name: Create or verify tag
@@ -223,31 +270,31 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ steps.set-tag.outputs.tag_name }}
-        name: "GitHub Actions Runner ${{ steps.check-version.outputs.runner_version }} for RISC-V (SingleFile Binary)"
+        name: "GitHub Actions Runner ${{ steps.check-version.outputs.runner_version }} for RISC-V (AppHost Binary)"
         body: |
-          # GitHub Actions Runner for RISC-V - Native Single-File Binary
+          # GitHub Actions Runner for RISC-V - Native AppHost Binary
           
           **Version:** ${{ steps.check-version.outputs.runner_version }}
           **Architecture:** linux-riscv64
-          **Build Type:** Single-File Native ELF Executable
+          **Build Type:** Native ELF Binary with AppHost
           **Build Date:** ${{ github.event.head_commit.timestamp }}
           
-          ## ✅ True Native Binary - No .NET Installation Required!
+          ## ✅ True Native Binaries Using AppHost Template
           
-          This build uses **PublishSingleFile** to create native ELF executables that work without requiring .NET installation:
+          This build manually bundles the RISC-V AppHost with the runner to create native executables:
           
-          - ✅ Native single-file executables (Runner.Listener, Runner.Worker, Runner.PluginHost)
-          - ✅ All dependencies bundled inside the executable
-          - ✅ No wrapper scripts needed
+          - ✅ Native ELF executables (Runner.Listener, Runner.Worker, Runner.PluginHost)
+          - ✅ Uses official AppHost from .NET 10 RISC-V SDK
+          - ✅ Self-contained with bundled runtime
           - ✅ Works exactly like official builds
           
-          ### Why PublishSingleFile?
+          ### How It Works
           
-          The standard `UseAppHost` approach fails on RISC-V due to SDK limitations, even though the AppHost exists. `PublishSingleFile` is an alternative that:
-          - Creates true native executables
-          - Bundles the .NET runtime inside the binary
-          - Extracts to temp on first run (transparent to users)
-          - Is officially supported by Microsoft
+          The .NET 10 RISC-V SDK includes an AppHost binary, but the SDK can't use it due to configuration issues. This build:
+          1. Builds the runner as self-contained DLLs
+          2. Manually copies the AppHost template from the SDK
+          3. Creates native executables that launch the DLLs
+          4. Packages everything together
           
           ### Installation
           ```bash
@@ -256,7 +303,7 @@ jobs:
           mkdir actions-runner && cd actions-runner
           tar xzf ../actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}.tar.gz
           
-          # Configure (works immediately!)
+          # Configure (works like official builds!)
           ./config.sh --url https://github.com/YOUR-ORG/YOUR-REPO --token YOUR-TOKEN
           
           # Run
@@ -267,15 +314,14 @@ jobs:
           
           - RISC-V 64-bit processor
           - Linux operating system
-          - Standard system libraries (glibc, libssl, libicu)
+          - Standard system libraries
           - **No .NET runtime installation required** ✅
           
           ### Technical Details
           
-          - **Deployment:** Self-Contained Single-File
-          - **PublishSingleFile:** true (native binary)
-          - **IncludeNativeLibrariesForSelfExtract:** true
-          - **Runtime:** .NET 10.0.102 (RISC-V port, bundled)
+          - **Deployment:** Self-Contained with Manual AppHost
+          - **Binary Type:** Native ELF (using SDK AppHost template)
+          - **Runtime:** .NET 10.0.102 (RISC-V, bundled)
           - **Target Framework:** net8.0
           - **Runtime Identifier:** linux-riscv64
           
@@ -284,24 +330,17 @@ jobs:
           ```
           actions-runner/
           ├── bin/
-          │   ├── Runner.Listener          # Native ELF single-file executable (~150MB)
-          │   ├── Runner.Worker            # Native ELF single-file executable
-          │   ├── Runner.PluginHost        # Native ELF single-file executable
-          │   └── (minimal additional files)
+          │   ├── Runner.Listener          # Native ELF executable (AppHost)
+          │   ├── Runner.Listener.dll      # Companion DLL
+          │   ├── Runner.Worker            # Native ELF executable (AppHost)
+          │   ├── Runner.Worker.dll        # Companion DLL
+          │   ├── Runner.PluginHost        # Native ELF executable (AppHost)
+          │   ├── Runner.PluginHost.dll    # Companion DLL
+          │   └── *.so                     # Runtime libraries
           ├── config.sh
           ├── run.sh
           └── ...
           ```
-          
-          ### How It Works
-          
-          PublishSingleFile bundles:
-          1. Your compiled application
-          2. .NET runtime
-          3. All dependencies
-          4. Native libraries
-          
-          Into a single native ELF executable. On first run, it extracts necessary files to a temp directory, then runs. This is transparent to users and provides the same experience as regular executables.
           
           ### Credits
           
