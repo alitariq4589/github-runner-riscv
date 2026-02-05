@@ -64,155 +64,88 @@ jobs:
           fi
         done
 
-    - name: Configure for Self-Contained without AppHost
+    - name: Configure for Self-Contained with AppHost
       run: |
-        echo "=== Configuring Self-Contained Build (will manually add AppHost) ==="
-        
+        echo "=== Configuring Self-Contained Build with AppHost ==="
+          
         for proj in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
           csproj="src/$proj/$proj.csproj"
           if [ -f "$csproj" ]; then
             echo "Processing: $csproj"
             
-            # Set SelfContained=true to bundle runtime
+            # Set SelfContained=true
             if grep -q "<SelfContained>" "$csproj"; then
               sed -i 's/<SelfContained>false<\/SelfContained>/<SelfContained>true<\/SelfContained>/g' "$csproj"
             else
               sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <SelfContained>true<\/SelfContained>/' "$csproj"
             fi
             
-            # Set UseAppHost=false (we'll add it manually)
+            # Set UseAppHost=true (let .NET create the structure)
             if grep -q "<UseAppHost>" "$csproj"; then
-              sed -i 's/<UseAppHost>.*<\/UseAppHost>/<UseAppHost>false<\/UseAppHost>/' "$csproj"
+              sed -i 's/<UseAppHost>.*<\/UseAppHost>/<UseAppHost>true<\/UseAppHost>/' "$csproj"
             else
-              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost>false<\/UseAppHost>/' "$csproj"
+              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost>true<\/UseAppHost>/' "$csproj"
             fi
             
-            echo "  ✓ Configured: SelfContained=true, UseAppHost=false (manual bundling)"
-            grep -E "SelfContained|UseAppHost" "$csproj" | head -3
+            # Disable ReadyToRun to avoid potential issues
+            if ! grep -q "<PublishReadyToRun>" "$csproj"; then
+              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <PublishReadyToRun>false<\/PublishReadyToRun>/' "$csproj"
+            fi
+            
+            echo "  ✓ Configured: SelfContained=true, UseAppHost=true"
           fi
         done
-
-    - name: Build with Self-Contained
+          
+    - name: Build with Self-Contained and AppHost
       run: |
         cd src
-        echo "=== Building Self-Contained (will produce DLLs) ==="
+        echo "=== Building Self-Contained with AppHost ==="
         ./dev.sh layout Release linux-riscv64
 
-    - name: Create Native Executables from AppHost Template
+    - name: Fix AppHost Binaries if Needed
       run: |
-        echo "=== Creating Native Executables using AppHost Template ==="
+        echo "=== Verifying and Fixing AppHost Binaries ==="
         
-        # Find the AppHost template
-        APPHOST_PATH="_dotnetsdk/10.0.102/packs/Microsoft.NETCore.App.Host.linux-riscv64/10.0.2/runtimes/linux-riscv64/native/apphost"
+        APPHOST_TEMPLATE="_dotnetsdk/10.0.102/packs/Microsoft.NETCore.App.Host.linux-riscv64/10.0.2/runtimes/linux-riscv64/native/apphost"
         
-        if [ ! -f "$APPHOST_PATH" ]; then
-          echo "❌ AppHost not found at $APPHOST_PATH"
+        if [ ! -f "$APPHOST_TEMPLATE" ]; then
+          echo "❌ AppHost template not found"
           find _dotnetsdk -name "apphost" -type f
           exit 1
         fi
         
-        echo "✓ Found AppHost template at: $APPHOST_PATH"
-        file "$APPHOST_PATH"
+        echo "✓ Found AppHost template"
+        file "$APPHOST_TEMPLATE"
         
-        # Create AppHostCreator script
-        cat > create_apphost.sh << 'APPHOST_SCRIPT'
-        #!/bin/bash
-        set -e
-            
-        APPHOST_TEMPLATE="$1"
-        DLL_PATH="$2"
-        OUTPUT_PATH="$3"
-            
-        echo "Creating native executable..."
-        echo "  Template: $APPHOST_TEMPLATE"
-        echo "  DLL: $DLL_PATH"
-        echo "  Output: $OUTPUT_PATH"
-            
-        # Copy apphost template
-        cp "$APPHOST_TEMPLATE" "$OUTPUT_PATH"
-        chmod +x "$OUTPUT_PATH"
-            
-        # The apphost has a placeholder for the DLL path
-        # We need to embed the DLL name into the binary
-        # The placeholder is a special string that we replace
-            
-        # Get DLL filename
-        DLL_NAME=$(basename "$DLL_PATH")
-            
-        # The AppHost expects to find a file named <apphost-name>.dll in the same directory
-        # So we just need to ensure the DLL has the right name
-        # The AppHost binary already has logic to find <executable-name>.dll
-            
-        echo "✓ Created native executable: $OUTPUT_PATH"
-        file "$OUTPUT_PATH"
-        APPHOST_SCRIPT
-
-        chmod +x create_apphost.sh
-        
-        # Create native executables for each component
         for app in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
+          BIN_PATH="_layout/bin/$app"
           DLL_PATH="_layout/bin/${app}.dll"
-          OUTPUT_PATH="_layout/bin/${app}"
-          
-          if [ -f "$DLL_PATH" ]; then
-            echo ""
-            echo "Creating native executable for $app..."
-            ./create_apphost.sh "$APPHOST_PATH" "$DLL_PATH" "$OUTPUT_PATH"
-            
-            # Verify it was created
-            if [ -f "$OUTPUT_PATH" ]; then
-              echo "✅ SUCCESS: Created $OUTPUT_PATH"
-              ls -lh "$OUTPUT_PATH"
-              file "$OUTPUT_PATH"
+        
+          echo ""
+          echo "Checking $app..."
+        
+          if [ -f "$BIN_PATH" ]; then
+            if file "$BIN_PATH" | grep -q "ELF.*executable"; then
+              echo "  ✓ Binary already valid"
             else
-              echo "❌ FAILED: Could not create $OUTPUT_PATH"
-              exit 1
+              echo "  ⚠️  Binary invalid, copying AppHost template"
+              cp "$APPHOST_TEMPLATE" "$BIN_PATH"
+              chmod +x "$BIN_PATH"
             fi
           else
-            echo "❌ ERROR: DLL not found: $DLL_PATH"
-            exit 1
+            echo "  ⚠️  Binary not found, creating from AppHost template"
+            cp "$APPHOST_TEMPLATE" "$BIN_PATH"
+            chmod +x "$BIN_PATH"
           fi
-        done
-
-    - name: Verify Native Binaries
-      run: |
-        echo "=== Verifying Native Binaries ==="
         
-        for binary in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
-          BIN_PATH="_layout/bin/$binary"
-          DLL_PATH="_layout/bin/${binary}.dll"
-          
-          echo ""
-          echo "Checking $binary..."
-          
-          # Check binary exists and is executable
-          if [ -x "$BIN_PATH" ]; then
-            echo "  ✓ Binary exists and is executable"
+          # Verify both binary and DLL exist
+          if file "$BIN_PATH" | grep -q "ELF.*RISC-V" && [ -f "$DLL_PATH" ]; then
+            echo "  ✅ Binary and DLL are valid"
+            ls -lh "$BIN_PATH" "$DLL_PATH"
           else
-            echo "  ❌ Binary missing or not executable"
+            echo "  ❌ Verification failed"
             exit 1
           fi
-          
-          # Check it's an ELF binary
-          if file "$BIN_PATH" | grep -q "ELF.*executable"; then
-            echo "  ✓ Is ELF executable"
-          else
-            echo "  ❌ Not an ELF executable"
-            file "$BIN_PATH"
-            exit 1
-          fi
-          
-          # Check DLL still exists (AppHost needs it)
-          if [ -f "$DLL_PATH" ]; then
-            echo "  ✓ Companion DLL exists"
-          else
-            echo "  ❌ Companion DLL missing (AppHost needs it!)"
-            exit 1
-          fi
-          
-          echo "  File details:"
-          file "$BIN_PATH"
-          ls -lh "$BIN_PATH"
         done
 
     - name: Test Native Binary Execution
