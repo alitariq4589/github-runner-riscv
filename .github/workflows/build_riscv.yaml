@@ -109,17 +109,17 @@ jobs:
           if [ -f "$csproj" ]; then
             echo "Processing: $csproj"
             
-            # Add UseAppHost property if not present
+            # Add UseAppHost and SelfContained properties if not present
             if ! grep -q "UseAppHost" "$csproj"; then
-              # Find the first PropertyGroup and add UseAppHost after it
-              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost Condition="'\''$(PackageRuntime)'\'' == '\''linux-riscv64'\''">false<\/UseAppHost>/' "$csproj"
-              echo "  ✓ Added UseAppHost=false for linux-riscv64"
+              # Find the first PropertyGroup and add both properties after it
+              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost>false<\/UseAppHost>\n    <SelfContained>false<\/SelfContained>/'    "$csproj"
+              echo "  ✓ Added UseAppHost=false and SelfContained=false"
             else
               echo "  - UseAppHost already configured"
             fi
             
             # Show the result
-            grep -A 2 "UseAppHost" "$csproj" || true
+            grep -A 3 "UseAppHost\|SelfContained" "$csproj" || true
           fi
         done
 
