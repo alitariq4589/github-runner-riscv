@@ -73,26 +73,25 @@ jobs:
         # Backup the original file
         cp "$PROPS_FILE" "${PROPS_FILE}.backup"
         
+        echo "Original net8.0 AppHostRuntimeIdentifiers:"
+        grep 'AppHostRuntimeIdentifiers.*freebsd-arm64"' "$PROPS_FILE" | head -1
+        
         # Add linux-riscv64 to net8.0 KnownAppHostPack AppHostRuntimeIdentifiers
-        # Find the net8.0 KnownAppHostPack section and add linux-riscv64;linux-musl-riscv64 after freebsd-arm64
-        sed -i '/TargetFramework="net8.0"/,/<KnownCrossgen2Pack/{ 
-          s/freebsd-arm64"/freebsd-arm64;linux-riscv64;linux-musl-riscv64"/
-        }' "$PROPS_FILE"
+        # This finds the line with freebsd-arm64" in net8.0 section and adds our RIDs
+        sed -i '0,/AppHostRuntimeIdentifiers=.*freebsd-arm64"/{s/freebsd-arm64"/freebsd-arm64;linux-riscv64;linux-musl-riscv64"/}' "$PROPS_FILE"
         
-        echo "✓ Patching complete. Verifying changes:"
         echo ""
-        echo "Before (from backup):"
-        grep -A 4 'KnownAppHostPack.*TargetFramework="net8.0"' "${PROPS_FILE}.backup" | grep AppHostRuntimeIdentifiers
-        echo ""
-        echo "After (patched):"
-        grep -A 4 'KnownAppHostPack.*TargetFramework="net8.0"' "$PROPS_FILE" | grep AppHostRuntimeIdentifiers
+        echo "Patched net8.0 AppHostRuntimeIdentifiers:"
+        grep 'AppHostRuntimeIdentifiers.*linux-riscv64' "$PROPS_FILE" | head -1
         
-        if grep -A 4 'KnownAppHostPack.*TargetFramework="net8.0"' "$PROPS_FILE" | grep -q "linux-riscv64"; then
+        if grep -q 'AppHostRuntimeIdentifiers.*linux-riscv64' "$PROPS_FILE"; then
           echo ""
           echo "✅ SUCCESS: linux-riscv64 has been added to net8.0 AppHost support"
         else
           echo ""
           echo "❌ ERROR: Failed to add linux-riscv64"
+          echo "Showing net8.0 section:"
+          grep -A 10 'TargetFramework="net8.0"' "$PROPS_FILE" | grep -A 5 KnownAppHostPack | head -10
           exit 1
         fi
 
