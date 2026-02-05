@@ -5,9 +5,9 @@ name: Build RISC-V runner
 on:
   push:
     branches:
-      - riscv_dotnet10
+      - main_riscv
     tags:
-      - '*_riscv'  # Tags patched for RISC-V
+      - '*_riscv'
   workflow_dispatch:
 
 jobs:
@@ -24,49 +24,55 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y liblttng-ust-dev libkrb5-dev zlib1g-dev libicu-dev libssl-dev libcurl4-openssl-dev libelf-dev libunwind-dev pkg-config wget tar libatomic1
+        sudo apt-get install -y liblttng-ust-dev libkrb5-dev zlib1g-dev libicu-dev \
+          libssl-dev libcurl4-openssl-dev libelf-dev libunwind-dev pkg-config wget tar libatomic1
     
-    - name: Download .NET 10 SDK
+    - name: Download .NET 10.0.102 SDK
       run: |
         cd $HOME
-        # Download .NET 10 SDK for RISC-V (glibc variant)
-        # Option 1: From your releases
-        wget -q -O dotnet.tar.gz https://github.com/YOUR_USERNAME/YOUR_REPO/releases/download/10.0.102/dotnet-sdk-10.0.102-linux-riscv64.tar.gz
+        # Download the official RISC-V .NET 10 SDK (glibc variant)
+        wget -q -O dotnet.tar.gz https://github.com/filipnavara/dotnet-riscv/releases/download/10.0.102/dotnet-sdk-10.0.102-linux-riscv64.tar.gz
         
-        # Option 2: If you want to use artifacts from the build workflow, see alternative below
-        
+        # Extract to versioned directory
         mkdir -p _dotnetsdk/10.0.102
         tar -xf dotnet.tar.gz -C _dotnetsdk/10.0.102
+        
+        # Add to PATH and set DOTNET_ROOT
         echo "$HOME/_dotnetsdk/10.0.102" >> $GITHUB_PATH
         echo "DOTNET_ROOT=$HOME/_dotnetsdk/10.0.102" >> $GITHUB_ENV
 
-    - name: Configure NuGet sources
-      run: |
-        # Clear any existing NuGet sources that might cause conflicts
-        dotnet nuget list source || true
-        
-        # Add official NuGet source
-        dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org || true
-        
-        # If you have custom NuGet packages, you can add a local source
-        # mkdir -p $HOME/packages
-        # dotnet nuget add source $HOME/packages -n local || true
-
     - name: Verify .NET installation
       run: |
+        echo "=== .NET Info ==="
         dotnet --info
+        echo ""
+        echo "=== .NET Version ==="
         dotnet --version
+        echo ""
+        echo "=== Available Runtimes ==="
         dotnet --list-runtimes
+        echo ""
+        echo "=== Available SDKs ==="
         dotnet --list-sdks
+
+    - name: Configure NuGet (if needed)
+      run: |
+        # Clear any problematic sources
+        dotnet nuget list source || true
+        
+        # The SDK should have everything needed, but add nuget.org as fallback
+        dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org || true
 
     - name: Restore and Build
       run: |
         cd src
+        # This should work without needing separate NuGet packages
         ./dev.sh layout Release linux-riscv64
 
     - name: Package
       run: |
-        cd src && ./dev.sh package Release linux-riscv64
+        cd src
+        ./dev.sh package Release linux-riscv64
     
     - name: Check Version
       id: check-version
