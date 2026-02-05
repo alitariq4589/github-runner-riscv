@@ -5,7 +5,7 @@ name: Build RISC-V runner
 on:
   push:
     branches:
-      - riscv_dotnet10
+      - main_riscv
     tags:
       - '*_riscv'
   workflow_dispatch:
@@ -20,6 +20,18 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v5
+    
+    - name: Patch dev.sh for RISC-V support
+      run: |
+        cd src
+        # Add linux-riscv64 to the supported runtime IDs list
+        sed -i 's/("$RUNTIME_ID" != '\''linux-arm'\'')/("$RUNTIME_ID" != '\''linux-arm'\'') \&\& ("$RUNTIME_ID" != '\''linux-riscv64'\'')/' dev.sh
+        
+        # Also add riscv64 detection in the CPU detection section (around line 45-50)
+        sed -i '/aarch64) RUNTIME_ID="linux-arm64";;/a\            riscv64) RUNTIME_ID="linux-riscv64";;' dev.sh
+        
+        echo "=== Verifying dev.sh patches ==="
+        grep -A 2 "linux-riscv64" dev.sh || echo "Warning: RISC-V support might not be fully patched"
     
     - name: Install dependencies
       run: |
@@ -55,18 +67,9 @@ jobs:
         echo "=== Available SDKs ==="
         dotnet --list-sdks
 
-    - name: Configure NuGet (if needed)
-      run: |
-        # Clear any problematic sources
-        dotnet nuget list source || true
-        
-        # The SDK should have everything needed, but add nuget.org as fallback
-        dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org || true
-
     - name: Restore and Build
       run: |
         cd src
-        # This should work without needing separate NuGet packages
         ./dev.sh layout Release linux-riscv64
 
     - name: Package
