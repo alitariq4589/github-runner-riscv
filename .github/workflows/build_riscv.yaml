@@ -1,0 +1,212 @@
+name: Build RISC-V runner
+
+on:
+  push:
+    branches:
+      - riscv_dotnet10
+    tags:
+      - '*_riscv'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: RISCV64
+    
+    outputs:
+      version-number: ${{ steps.check-version.outputs.runner_version }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y liblttng-ust-dev libkrb5-dev zlib1g-dev libicu-dev \
+          libssl-dev libcurl4-openssl-dev libelf-dev libunwind-dev pkg-config wget tar libatomic1
+    
+    - name: Download and setup .NET 10.0.102 SDK
+      run: |
+        # Download the RISC-V .NET 10 SDK
+        wget -q -O dotnet.tar.gz https://github.com/filipnavara/dotnet-riscv/releases/download/10.0.102/dotnet-sdk-10.0.102-linux-riscv64.tar.gz
+        
+        # Extract to the location dev.sh expects
+        mkdir -p _dotnetsdk/10.0.102
+        tar -xf dotnet.tar.gz -C _dotnetsdk/10.0.102
+        
+        # Create the marker file that dev.sh checks for
+        echo "10.0.102" > _dotnetsdk/10.0.102/.10.0.102
+        
+        # Also set it up in PATH
+        echo "$PWD/_dotnetsdk/10.0.102" >> $GITHUB_PATH
+        echo "DOTNET_ROOT=$PWD/_dotnetsdk/10.0.102" >> $GITHUB_ENV
+
+    - name: Check for global.json and update if needed
+      run: |
+        echo "=== Checking for global.json files ==="
+        find . -name "global.json" -type f
+        
+        # Update any global.json files to use .NET 10
+        for json_file in $(find . -name "global.json" -type f); do
+          echo "Found: $json_file"
+          cat "$json_file"
+          
+          if grep -q "sdk" "$json_file"; then
+            echo "Updating $json_file to use .NET 10.0.102"
+            sed -i 's/"version".*:.*"[0-9].*"/"version": "10.0.102"/g' "$json_file"
+            echo "Updated content:"
+            cat "$json_file"
+          fi
+        done
+
+    - name: Patch dev.sh for RISC-V and .NET 10
+      run: |
+        cd src
+        
+        # 1. Update .NET SDK version to 10.0.102
+        sed -i 's/DOTNETSDK_VERSION="8.0.415"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
+        
+        # 2. Add linux-riscv64 to supported platforms
+        sed -i 's/("$RUNTIME_ID" != '\''linux-arm'\'')/("$RUNTIME_ID" != '\''linux-arm'\'') \&\& ("$RUNTIME_ID" != '\''linux-riscv64'\'')/' dev.sh
+        
+        # 3. Add riscv64 CPU detection
+        sed -i '/aarch64) RUNTIME_ID="linux-arm64";;/a\            riscv64) RUNTIME_ID="linux-riscv64";;' dev.sh
+
+    - name: Add linux-riscv64 to RuntimeIdentifiers in all project files
+      run: |
+        echo "=== Adding linux-riscv64 to RuntimeIdentifiers ==="
+        
+        # Find all .csproj files and add linux-riscv64 to RuntimeIdentifiers
+        find src -name "*.csproj" -type f | while read csproj; do
+          echo "Processing: $csproj"
+          
+          # Check if file has RuntimeIdentifiers tag
+          if grep -q "<RuntimeIdentifiers>" "$csproj"; then
+            # Add linux-riscv64 to the RuntimeIdentifiers list if not already present
+            if ! grep "<RuntimeIdentifiers>" "$csproj" | grep -q "linux-riscv64"; then
+              sed -i 's/<RuntimeIdentifiers>\(.*\)<\/RuntimeIdentifiers>/<RuntimeIdentifiers>\1;linux-riscv64<\/RuntimeIdentifiers>/' "$csproj"
+              echo "  ✓ Added linux-riscv64 to RuntimeIdentifiers"
+              grep "RuntimeIdentifiers" "$csproj"
+            else
+              echo "  - Already contains linux-riscv64"
+            fi
+          else
+            echo "  - No RuntimeIdentifiers found"
+          fi
+        done
+
+    - name: Disable UseAppHost for RISC-V builds
+      run: |
+        echo "=== Disabling UseAppHost for RISC-V (SDK limitation workaround) ==="
+        
+        for proj in "Runner.Listener" "Runner.Worker" "Runner.PluginHost"; do
+          csproj="src/$proj/$proj.csproj"
+          if [ -f "$csproj" ]; then
+            echo "Processing: $csproj"
+            
+            # Replace SelfContained true with false
+            sed -i 's/<SelfContained>true<\/SelfContained>/<SelfContained>false<\/SelfContained>/g' "$csproj"
+            
+            # Add UseAppHost if not present
+            if ! grep -q "UseAppHost" "$csproj"; then
+              sed -i '0,/<PropertyGroup>/s/<PropertyGroup>/<PropertyGroup>\n    <UseAppHost>false<\/UseAppHost>/' "$csproj"
+              echo "  ✓ Added UseAppHost=false"
+            fi
+            
+            echo "  ✓ Modified SelfContained to false"
+            
+            # Verify changes
+            grep -E "UseAppHost|SelfContained" "$csproj" | head -5
+          fi
+        done
+
+    - name: Patch dev.sh to handle DLL files (no AppHost)
+      run: |
+        cd src
+        
+        # Make chmod commands conditional - only run if files exist
+        sed -i 's/chmod +x "\${LAYOUT_DIR}\/bin\/Runner\.Listener"/[ -f "\${LAYOUT_DIR}\/bin\/Runner.Listener" ] \&\& chmod +x "\${LAYOUT_DIR}\/bin\/Runner.Listener" || true/' dev.sh
+        sed -i 's/chmod +x "\${LAYOUT_DIR}\/bin\/Runner\.Worker"/[ -f "\${LAYOUT_DIR}\/bin\/Runner.Worker" ] \&\& chmod +x "\${LAYOUT_DIR}\/bin\/Runner.Worker" || true/' dev.sh
+        sed -i 's/chmod +x "\${LAYOUT_DIR}\/bin\/Runner\.PluginHost"/[ -f "\${LAYOUT_DIR}\/bin\/Runner.PluginHost" ] \&\& chmod +x "\${LAYOUT_DIR}\/bin\/Runner.PluginHost" || true/' dev.sh
+        
+        echo "✓ Made chmod commands conditional"
+
+    - name: Patch dev.sh package function to handle DLL files
+      run: |
+        cd src
+        
+        # Replace the runner_ver line in package() function to use dotnet for .dll files
+        sed -i 's|runner_ver=$("\${LAYOUT_DIR}/bin/Runner.Listener" --version)|runner_ver=$(dotnet "\${LAYOUT_DIR}/bin/Runner.Listener.dll" --version 2>/dev/null)|' dev.sh
+        
+        echo "✓ Patched package() function to use dotnet for .dll files"
+
+    - name: Verify .NET installation
+      run: |
+        echo "=== .NET Info ==="
+        dotnet --info
+
+    - name: Restore and Build
+      run: |
+        cd src
+        ./dev.sh layout Release linux-riscv64
+
+    - name: Package
+      run: |
+        cd src
+        ./dev.sh package Release linux-riscv64
+    
+    - name: Check Version
+      id: check-version
+      run: |
+        # Since we're using UseAppHost=false, we need to run with dotnet
+        RUNNER_VERSION=$(dotnet _layout/bin/Runner.Listener.dll --version 2>/dev/null || cat src/runnerversion)
+        echo "The Github runner version is $RUNNER_VERSION"
+        echo "runner_version=$RUNNER_VERSION" >> $GITHUB_OUTPUT
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: actions-runner-linux-riscv64-${{ steps.check-version.outputs.runner_version }}
+        path: "_package/actions-runner-linux-riscv64-*.tar.gz"
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: actions-runner-linux-riscv64-${{ needs.build.outputs.version-number }}
+          path: _package
+
+      - name: Get filename of the package
+        id: get_filename
+        run: |
+          filename=$(basename $(ls -1 _package/actions-runner-linux-riscv64-*.tar.gz))
+          echo "filename=$filename" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: "_package/${{ steps.get_filename.outputs.filename }}"
+          asset_name: ${{ steps.get_filename.outputs.filename }}
+          asset_content_type: application/gzip
