@@ -3,7 +3,7 @@ name: Build RISC-V runner
 on:
   push:
     branches:
-      - riscv_dotnet10
+      - riscv_dotnet10_build
   workflow_dispatch:
 
 jobs:
