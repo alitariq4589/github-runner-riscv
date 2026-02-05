@@ -134,10 +134,10 @@ jobs:
           
         # Add conditional chmod that checks if the file exists before chmod
         sed -i '/chmod +x.*installdependencies.sh/i\        [ -f "${LAYOUT_DIR}/bin/Runner.Listener" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.Listener" ||      true\n        [ -f "${LAYOUT_DIR}/bin/Runner.Worker" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.Worker" || true\n        [ -f "${LAYOUT_DIR}/bin/Runner.      PluginHost" ] && chmod +x "${LAYOUT_DIR}/bin/Runner.PluginHost" || true' dev.sh
-        - name: Verify .NET installation
-          run: |
-            echo "=== .NET Info ==="
-            dotnet --info
+    - name: Verify .NET installation
+      run: |
+        echo "=== .NET Info ==="
+        dotnet --info
 
     - name: Restore and Build
       run: |
