@@ -170,7 +170,69 @@ jobs:
         cd src
         echo "=== Building Self-Contained Runner ==="
         ./dev.sh layout Release linux-riscv64
-
+    - name: Download and setup Node.js 20 and 24 for RISC-V
+      run: |
+        echo "=== Setting up Node.js for RISC-V ==="
+        
+        # Create externals directory
+        mkdir -p _layout/externals
+        
+        # ============================================
+        # Download and setup Node.js 20
+        # ============================================
+        echo ""
+        echo "--- Setting up Node.js 20 for RISC-V ---"
+        mkdir -p _layout/externals/node20
+        
+        NODE20_URL="https://unofficial-builds.nodejs.org/download/release/v20.9.0/node-v20.9.0-linux-riscv64.tar.gz"
+        echo "Downloading Node.js 20 from: $NODE20_URL"
+        
+        wget -q -O node20-riscv64.tar.gz "$NODE20_URL"
+        
+        # Extract Node.js 20
+        tar -xzf node20-riscv64.tar.gz -C _layout/externals/node20 --strip-components=1
+        rm node20-riscv64.tar.gz
+        
+        # Verify Node.js 20
+        if [ -f "_layout/externals/node20/bin/node" ]; then
+          chmod +x _layout/externals/node20/bin/node
+          NODE20_VERSION=$(_layout/externals/node20/bin/node --version)
+          echo "✅ Node.js 20 installed: $NODE20_VERSION"
+        else
+          echo "❌ Node.js 20 installation failed!"
+          exit 1
+        fi
+        
+        # ============================================
+        # Download and setup Node.js 24
+        # ============================================
+        echo ""
+        echo "--- Setting up Node.js 24 for RISC-V ---"
+        mkdir -p _layout/externals/node24
+        
+        NODE24_URL="https://github.com/alitariq4589/nodejs-riscv/releases/download/v24.7.0/nodejs-24.7.0-riscv64-linux.tar.gz"
+        echo "Downloading Node.js 24 from: $NODE24_URL"
+        
+        wget -q -O node24-riscv64.tar.gz "$NODE24_URL"
+        
+        # Extract Node.js 24
+        tar -xzf node24-riscv64.tar.gz -C _layout/externals/node24 --strip-components=1
+        rm node24-riscv64.tar.gz
+        
+        # Verify Node.js 24
+        if [ -f "_layout/externals/node24/bin/node" ]; then
+          chmod +x _layout/externals/node24/bin/node
+          NODE24_VERSION=$(_layout/externals/node24/bin/node --version)
+          echo "✅ Node.js 24 installed: $NODE24_VERSION"
+        else
+          echo "❌ Node.js 24 installation failed!"
+          exit 1
+        fi
+        
+        echo ""
+        echo "=== Node.js Setup Complete ==="
+        echo "Node.js 20: $NODE20_VERSION"
+        echo "Node.js 24: $NODE24_VERSION"
     - name: Verify Build Output
       run: |
         echo "=== Verifying Build Output ==="
