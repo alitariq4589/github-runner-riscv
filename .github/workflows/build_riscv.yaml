@@ -114,22 +114,17 @@ jobs:
       run: |
         VARUTIL_FILE="src/Runner.Common/Util/VarUtil.cs"
         
-        # Find the OSArchitecture property and patch it to detect RISC-V
-        if grep -q "public static string OSArchitecture" "$VARUTIL_FILE"; then
-          # Backup the file
-          cp "$VARUTIL_FILE" "${VARUTIL_FILE}.backup"
-          
-          # Add RISC-V detection
-          # This will add a check for RISC-V before other architecture checks
-          sed -i '/public static string OSArchitecture/,/return.*Architecture/ {
-            /return.*Architecture/ i\            if (System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString().Contains("RiscV") || System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString().Contains("RiscV64")) { return "RISCV64"; }
-          }' "$VARUTIL_FILE"
-          
-          echo "✅ Patched VarUtil.cs to detect RISC-V"
-        else
-          echo "⚠️ Could not find OSArchitecture property in VarUtil.cs"
-          exit 1
-        fi
+        # Backup the file
+        cp "$VARUTIL_FILE" "${VARUTIL_FILE}.backup"
+        
+        # Add RISC-V runtime detection at the start of OSArchitecture getter
+        # This checks at runtime and returns RISCV64 before the switch statement
+        sed -i '/get$/,/switch (Constants.Runner.PlatformArchitecture)/ {
+          /switch (Constants.Runner.PlatformArchitecture)/ i\                var arch = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();\
+                if (arch.Contains("RiscV", System.StringComparison.OrdinalIgnoreCase)) { return "RISCV64"; }
+        }' "$VARUTIL_FILE"
+        
+        echo "✅ Patched VarUtil.cs to detect RISC-V at runtime"
     - name: Register linux-riscv64 for net8.0
       run: |
         echo "=== Patching Microsoft.NETCoreSdk.BundledVersions.props for linux-riscv64 net8.0 support ==="
