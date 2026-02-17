@@ -100,6 +100,88 @@ jobs:
         sed -i 's/DOTNETSDK_VERSION="8.0.417"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
         sed -i 's/("$RUNTIME_ID" != '\''linux-arm'\'')/("$RUNTIME_ID" != '\''linux-arm'\'') \&\& ("$RUNTIME_ID" != '\''linux-riscv64'\'')/' dev.sh
         sed -i '/aarch64) RUNTIME_ID="linux-arm64";;/a\            riscv64) RUNTIME_ID="linux-riscv64";;' dev.sh
+    - name: Patch SelfUpdater and SelfUpdaterV2 to disable auto-update for RISC-V
+      run: |
+        echo "=== Patching SelfUpdater.cs ==="
+        # In V1, the cleanest kill switch is in UpdateNeeded() - just return false immediately
+        # This prevents any package lookup or download attempt
+        UPDATER_V1="src/Runner.Listener/SelfUpdater.cs"
+
+        python3 - "$UPDATER_V1" <<'PYEOF'
+        import sys, re
+
+        path = sys.argv[1]
+        with open(path) as f:
+            content = f.read()
+        
+        # Patch UpdateNeeded() to always return false
+        # Signature: private async Task<bool> UpdateNeeded(string targetVersion, CancellationToken token)
+        pattern = r'(private async Task<bool> UpdateNeeded\([^)]*\)\s*\{)'
+        replacement = r'''\1
+                    // Auto-update disabled: no linux-riscv64 package exists on GitHub releases
+                    Trace.Info($"Auto-update disabled for RISC-V build. Skipping update check.");
+                    return false;'''
+        
+        new_content, n = re.subn(pattern, replacement, content, count=1)
+        
+        if n == 0:
+            print("ERROR: Could not find UpdateNeeded() method in SelfUpdater.cs")
+            for i, line in enumerate(content.splitlines()):
+                if 'UpdateNeeded' in line:
+                    print(f"  Line {i+1}: {line}")
+            sys.exit(1)
+                
+        with open(path, 'w') as f:
+            f.write(new_content)
+        
+        print("✅ Patched SelfUpdater.cs: UpdateNeeded() now returns false immediately")
+        PYEOF
+    
+        echo ""
+        echo "=== Patching SelfUpdaterV2.cs ==="
+        # In V2, the server sends the download URL directly in the message - there is no UpdateNeeded().
+        # We must patch SelfUpdate() itself to return false before it does anything.
+        UPDATER_V2="src/Runner.Listener/SelfUpdaterV2.cs"
+
+        python3 - "$UPDATER_V2" <<'PYEOF'
+        import sys, re
+            
+        path = sys.argv[1]
+        with open(path) as f:
+            content = f.read()
+        
+        # Patch SelfUpdate() - insert early return right after Busy = true;
+        # We target the block: Busy = true;\n        try\n        {
+        pattern = r'(Busy = true;\s*try\s*\{)'
+        replacement = r'''\1
+                    // Auto-update disabled: no linux-riscv64 package exists on GitHub releases
+                    Trace.Info($"Auto-update disabled for RISC-V build. Skipping update.");
+                    Busy = false;
+                    return false;'''
+        
+        new_content, n = re.subn(pattern, replacement, content, count=1)
+        
+        if n == 0:
+            print("ERROR: Could not find patch location in SelfUpdaterV2.cs")
+            for i, line in enumerate(content.splitlines()):
+                if 'Busy' in line or 'SelfUpdate' in line:
+                    print(f"  Line {i+1}: {line}")
+            sys.exit(1)
+                
+        with open(path, 'w') as f:
+            f.write(new_content)
+        
+        print("✅ Patched SelfUpdaterV2.cs: SelfUpdate() now returns false immediately")
+        PYEOF
+    
+        echo ""
+        echo "=== Verifying patches ==="
+        echo "--- SelfUpdater.cs (UpdateNeeded) ---"
+        grep -A 4 "private async Task<bool> UpdateNeeded" src/Runner.Listener/SelfUpdater.cs | head -8
+
+        echo ""
+        echo "--- SelfUpdaterV2.cs (SelfUpdate) ---"
+        grep -A 5 "Busy = true;" src/Runner.Listener/SelfUpdaterV2.cs | head -10
 
     - name: Add linux-riscv64 to RuntimeIdentifiers
       run: |
