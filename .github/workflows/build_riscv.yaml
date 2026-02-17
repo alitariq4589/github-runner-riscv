@@ -103,24 +103,21 @@ jobs:
     - name: Patch SelfUpdater and SelfUpdaterV2 to disable auto-update for RISC-V
       run: |
         echo "=== Patching SelfUpdater.cs ==="
-        # In V1, the cleanest kill switch is in UpdateNeeded() - just return false immediately
-        # This prevents any package lookup or download attempt
         UPDATER_V1="src/Runner.Listener/SelfUpdater.cs"
 
         python3 - "$UPDATER_V1" <<'PYEOF'
         import sys, re
-
+        
         path = sys.argv[1]
         with open(path) as f:
             content = f.read()
         
-        # Patch UpdateNeeded() to always return false
-        # Signature: private async Task<bool> UpdateNeeded(string targetVersion, CancellationToken token)
         pattern = r'(private async Task<bool> UpdateNeeded\([^)]*\)\s*\{)'
         replacement = r'''\1
                     // Auto-update disabled: no linux-riscv64 package exists on GitHub releases
                     Trace.Info($"Auto-update disabled for RISC-V build. Skipping update check.");
-                    return false;'''
+                    return false;
+        #pragma warning disable CS0162'''
         
         new_content, n = re.subn(pattern, replacement, content, count=1)
         
@@ -134,30 +131,27 @@ jobs:
         with open(path, 'w') as f:
             f.write(new_content)
         
-        print("✅ Patched SelfUpdater.cs: UpdateNeeded() now returns false immediately")
+        print("✅ Patched SelfUpdater.cs")
         PYEOF
     
         echo ""
         echo "=== Patching SelfUpdaterV2.cs ==="
-        # In V2, the server sends the download URL directly in the message - there is no UpdateNeeded().
-        # We must patch SelfUpdate() itself to return false before it does anything.
         UPDATER_V2="src/Runner.Listener/SelfUpdaterV2.cs"
-
+    
         python3 - "$UPDATER_V2" <<'PYEOF'
         import sys, re
-            
+        
         path = sys.argv[1]
         with open(path) as f:
             content = f.read()
         
-        # Patch SelfUpdate() - insert early return right after Busy = true;
-        # We target the block: Busy = true;\n        try\n        {
         pattern = r'(Busy = true;\s*try\s*\{)'
         replacement = r'''\1
                     // Auto-update disabled: no linux-riscv64 package exists on GitHub releases
                     Trace.Info($"Auto-update disabled for RISC-V build. Skipping update.");
                     Busy = false;
-                    return false;'''
+                    return false;
+        #pragma warning disable CS0162'''
         
         new_content, n = re.subn(pattern, replacement, content, count=1)
         
@@ -171,17 +165,16 @@ jobs:
         with open(path, 'w') as f:
             f.write(new_content)
         
-        print("✅ Patched SelfUpdaterV2.cs: SelfUpdate() now returns false immediately")
+        print("✅ Patched SelfUpdaterV2.cs")
         PYEOF
     
         echo ""
         echo "=== Verifying patches ==="
-        echo "--- SelfUpdater.cs (UpdateNeeded) ---"
-        grep -A 4 "private async Task<bool> UpdateNeeded" src/Runner.Listener/SelfUpdater.cs | head -8
-
+        echo "--- SelfUpdater.cs ---"
+        grep -A 6 "private async Task<bool> UpdateNeeded" src/Runner.Listener/SelfUpdater.cs | head -10
         echo ""
-        echo "--- SelfUpdaterV2.cs (SelfUpdate) ---"
-        grep -A 5 "Busy = true;" src/Runner.Listener/SelfUpdaterV2.cs | head -10
+        echo "--- SelfUpdaterV2.cs ---"
+        grep -A 7 "Busy = true;" src/Runner.Listener/SelfUpdaterV2.cs | head -12
 
     - name: Add linux-riscv64 to RuntimeIdentifiers
       run: |
