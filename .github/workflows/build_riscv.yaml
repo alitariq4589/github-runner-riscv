@@ -97,7 +97,9 @@ jobs:
     - name: Patch dev.sh for RISC-V and .NET 10
       run: |
         cd src
-        sed -i 's/DOTNETSDK_VERSION="8.0.417"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
+        sed -i -E 's/DOTNETSDK_VERSION="[^"]*"/DOTNETSDK_VERSION="10.0.102"/' dev.sh
+        grep -q 'DOTNETSDK_VERSION="10.0.102"' dev.sh || { echo "❌ dev.sh patch failed"; exit 1; }
+
         sed -i 's/("$RUNTIME_ID" != '\''linux-arm'\'')/("$RUNTIME_ID" != '\''linux-arm'\'') \&\& ("$RUNTIME_ID" != '\''linux-riscv64'\'')/' dev.sh
         sed -i '/aarch64) RUNTIME_ID="linux-arm64";;/a\            riscv64) RUNTIME_ID="linux-riscv64";;' dev.sh
     - name: Patch SelfUpdater and SelfUpdaterV2 to disable auto-update for RISC-V
