@@ -15,6 +15,12 @@ permissions:
   contents: write
   actions: write
 
+env:
+  # The branch that holds the RISC-V fork and is built by the sibling workflow.
+  TARGET_BRANCH: main
+  # Display name of the build workflow we dispatch after a successful sync.
+  BUILD_WORKFLOW_NAME: Build RISC-V runner (Fixed AppHost Registration)
+
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
@@ -25,10 +31,10 @@ jobs:
       synced:           ${{ steps.sync.outputs.synced }}
 
     steps:
-      - name: Checkout riscv_dotnet10_build branch
+      - name: Checkout ${{ env.TARGET_BRANCH }}
         uses: actions/checkout@v5
         with:
-          ref: riscv_dotnet10_build
+          ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -63,7 +69,7 @@ jobs:
             CURRENT="unknown"
           fi
           echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "📌 Current branch version: $CURRENT"
+          echo "📌 Current ${{ env.TARGET_BRANCH }} version: $CURRENT"
 
       - name: Check if release already exists
         id: release-check
@@ -102,7 +108,7 @@ jobs:
           echo "🤔 Decision: should_build=$SHOULD_BUILD"
           echo "   Reason: $REASON"
 
-      - name: Sync upstream changes into branch
+      - name: Sync upstream changes into ${{ env.TARGET_BRANCH }}
         id: sync
         if: steps.decide.outputs.should_build == 'true' && steps.upstream.outputs.version != steps.current.outputs.version
         run: |
@@ -114,24 +120,20 @@ jobs:
           git remote add upstream https://github.com/actions/runner.git
           git fetch upstream "refs/tags/${{ steps.upstream.outputs.tag }}:refs/tags/${{ steps.upstream.outputs.tag }}"
 
-          # Remember our branch tip so we can restore our workflow files after the merge.
-          # GITHUB_TOKEN cannot push changes to .github/workflows/, so upstream workflow
-          # changes must never make it into the merge commit.
-          OUR_TIP=$(git rev-parse HEAD)
-          echo "Branch tip before merge: $OUR_TIP"
-
-          echo "=== Merging upstream ${{ steps.upstream.outputs.tag }} into riscv_dotnet10_build ==="
+          echo "=== Merging upstream ${{ steps.upstream.outputs.tag }} into ${{ env.TARGET_BRANCH }} ==="
           if git merge "${{ steps.upstream.outputs.tag }}" --no-edit \
               -m "chore: sync with upstream ${{ steps.upstream.outputs.tag }}"; then
             echo "✅ Clean merge"
           else
             echo "⚠️  Merge conflicts detected – attempting auto-resolution"
 
+            # Always keep our CI configuration as-is
             if [ -d .github/workflows ]; then
               git checkout --ours .github/workflows/ || true
               git add .github/workflows/ || true
             fi
 
+            # Fail loudly if anything else is still unresolved
             if git ls-files -u | grep -q .; then
               echo "❌ Unresolved conflicts – manual intervention required:"
               git ls-files -u
@@ -142,47 +144,53 @@ jobs:
             git commit -m "chore: sync with upstream ${{ steps.upstream.outputs.tag }} (auto-resolved)"
           fi
 
-          # --- Reset .github/workflows/ to exactly what was on our branch pre-merge ---
-          # Stage deletion of every workflow file currently in the tree, then extract the
-          # pre-merge versions back. Net effect: only our workflows remain.
+          # -----------------------------------------------------------------
+          # GITHUB_TOKEN cannot push changes under .github/workflows/ because
+          # it lacks the `workflows` scope. Upstream's own CI workflows are
+          # irrelevant to this fork, so reset that directory to exactly what
+          # our branch had before the merge, then amend the merge commit.
+          # -----------------------------------------------------------------
           echo "=== Restoring .github/workflows/ to pre-merge state ==="
-          if [ -d .github/workflows ]; then
-            git rm -rf --ignore-unmatch .github/workflows/ >/dev/null 2>&1 || true
+          OUR_PARENT=$(git rev-parse HEAD^1)
+          echo "Our pre-merge commit: $OUR_PARENT"
+
+          rm -rf .github/workflows
+          if git ls-tree "$OUR_PARENT" -- .github/workflows/ | grep -q .; then
+            git checkout "$OUR_PARENT" -- .github/workflows/
+          else
+            git rm -rf --cached --ignore-unmatch .github/workflows/ >/dev/null 2>&1 || true
           fi
-          git checkout "$OUR_TIP" -- .github/workflows/ 2>/dev/null || true
-          git add .github/workflows/ 2>/dev/null || true
+
+          git add -A .github/workflows/ 2>/dev/null || true
 
           if ! git diff --cached --quiet; then
             git commit --amend --no-edit
-            echo "✅ Amended merge commit – our workflow files preserved"
+            echo "✅ Reverted upstream .github/workflows/ changes; merge commit amended"
           else
-            echo "ℹ️  No upstream workflow changes to strip"
+            echo "ℹ️  Upstream made no changes under .github/workflows/"
           fi
 
           echo "=== Pushing synced changes ==="
-          git push origin riscv_dotnet10_build
+          git push origin "${{ env.TARGET_BRANCH }}"
           echo "synced=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Pushed upstream changes to riscv_dotnet10_build"
+          echo "✅ Pushed upstream changes to ${{ env.TARGET_BRANCH }}"
 
       - name: Trigger build workflow
         if: steps.decide.outputs.should_build == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "🚀 Dispatching build workflow on riscv_dotnet10_build"
+          echo "🚀 Dispatching '${{ env.BUILD_WORKFLOW_NAME }}' on ${{ env.TARGET_BRANCH }}"
 
-          # Reference by workflow name. If you prefer, swap this for the filename,
-          # e.g.  gh workflow run build-riscv.yml --ref riscv_dotnet10_build
-          gh workflow run "Build RISC-V runner (Fixed AppHost Registration)" \
-            --ref  riscv_dotnet10_build \
+          gh workflow run "${{ env.BUILD_WORKFLOW_NAME }}" \
+            --ref  "${{ env.TARGET_BRANCH }}" \
             --repo "${{ github.repository }}"
 
-          # Give GitHub a moment to register the run, then show the most recent ones
           sleep 5
           echo ""
           echo "📋 Recent runs of the build workflow:"
           gh run list \
-            --workflow "Build RISC-V runner (Fixed AppHost Registration)" \
+            --workflow "${{ env.BUILD_WORKFLOW_NAME }}" \
             --limit 3 \
             --repo "${{ github.repository }}"
 
@@ -194,6 +202,7 @@ jobs:
             echo ""
             echo "| Field            | Value |"
             echo "|------------------|-------|"
+            echo "| Target branch    | \`${{ env.TARGET_BRANCH }}\` |"
             echo "| Upstream latest  | \`${{ steps.upstream.outputs.tag }}\` |"
             echo "| Branch version   | \`${{ steps.current.outputs.version }}\` |"
             echo "| Release exists   | ${{ steps.release-check.outputs.exists }} |"
