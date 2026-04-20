@@ -1,0 +1,181 @@
+name: Check Upstream and Build RISC-V Runner
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # Daily at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force a build even if no upstream update is detected'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+
+    outputs:
+      should_build:     ${{ steps.decide.outputs.should_build }}
+      upstream_version: ${{ steps.upstream.outputs.version }}
+      synced:           ${{ steps.sync.outputs.synced }}
+
+    steps:
+      - name: Checkout riscv_dotnet10_build branch
+        uses: actions/checkout@v5
+        with:
+          ref: riscv_dotnet10_build
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch latest upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Fetching latest actions/runner release ==="
+          LATEST=$(curl -sSL \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/actions/runner/releases/latest \
+            | jq -r .tag_name)
+
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+            echo "❌ Failed to fetch upstream latest release"
+            exit 1
+          fi
+
+          VERSION=${LATEST#v}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$LATEST"       >> "$GITHUB_OUTPUT"
+          echo "📦 Upstream latest: $LATEST (version: $VERSION)"
+
+      - name: Read current branch version
+        id: current
+        run: |
+          if [ -f src/runnerversion ]; then
+            CURRENT=$(tr -d '[:space:]' < src/runnerversion)
+          else
+            CURRENT="unknown"
+          fi
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "📌 Current branch version: $CURRENT"
+
+      - name: Check if release already exists
+        id: release-check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXPECTED_TAG="v${{ steps.upstream.outputs.version }}-riscv64-net8"
+          if gh release view "$EXPECTED_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "exists=true"  >> "$GITHUB_OUTPUT"
+            echo "✅ Release $EXPECTED_TAG already exists"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "🆕 Release $EXPECTED_TAG does not exist yet"
+          fi
+
+      - name: Decide whether to build
+        id: decide
+        run: |
+          SHOULD_BUILD=false
+          REASON=""
+
+          if [ "${{ inputs.force_build }}" = "true" ]; then
+            SHOULD_BUILD=true
+            REASON="force_build input is true"
+          elif [ "${{ steps.upstream.outputs.version }}" != "${{ steps.current.outputs.version }}" ]; then
+            SHOULD_BUILD=true
+            REASON="upstream (${{ steps.upstream.outputs.version }}) differs from branch (${{ steps.current.outputs.version }})"
+          elif [ "${{ steps.release-check.outputs.exists }}" = "false" ]; then
+            SHOULD_BUILD=true
+            REASON="no release exists for current version"
+          else
+            REASON="branch is up-to-date and release already exists"
+          fi
+
+          echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
+          echo "🤔 Decision: should_build=$SHOULD_BUILD"
+          echo "   Reason: $REASON"
+
+      - name: Sync upstream changes into branch
+        id: sync
+        if: steps.decide.outputs.should_build == 'true' && steps.upstream.outputs.version != steps.current.outputs.version
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "=== Adding upstream remote and fetching tag ==="
+          git remote add upstream https://github.com/actions/runner.git
+          git fetch upstream "refs/tags/${{ steps.upstream.outputs.tag }}:refs/tags/${{ steps.upstream.outputs.tag }}"
+
+          echo "=== Merging upstream ${{ steps.upstream.outputs.tag }} into riscv_dotnet10_build ==="
+          if git merge "${{ steps.upstream.outputs.tag }}" --no-edit \
+              -m "chore: sync with upstream ${{ steps.upstream.outputs.tag }}"; then
+            echo "✅ Clean merge"
+          else
+            echo "⚠️  Merge conflicts detected – attempting auto-resolution"
+
+            # Always keep our CI configuration as-is
+            if [ -d .github/workflows ]; then
+              git checkout --ours .github/workflows/ || true
+              git add .github/workflows/ || true
+            fi
+
+            # Fail loudly if anything else is still unresolved
+            if git ls-files -u | grep -q .; then
+              echo "❌ Unresolved conflicts – manual intervention required:"
+              git ls-files -u
+              git merge --abort
+              exit 1
+            fi
+
+            git commit -m "chore: sync with upstream ${{ steps.upstream.outputs.tag }} (auto-resolved)"
+          fi
+
+          echo "=== Pushing synced changes ==="
+          git push origin riscv_dotnet10_build
+          echo "synced=true" >> "$GITHUB_OUTPUT"
+          echo "✅ Pushed upstream changes to riscv_dotnet10_build"
+
+      - name: Trigger build workflow
+        if: steps.decide.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🚀 Dispatching build workflow on riscv_dotnet10_build"
+
+          # Reference by workflow name. If you prefer, swap this for the filename,
+          # e.g.  gh workflow run build-riscv.yml --ref riscv_dotnet10_build
+          gh workflow run "Build RISC-V runner (Fixed AppHost Registration)" \
+            --ref  riscv_dotnet10_build \
+            --repo "${{ github.repository }}"
+
+          # Give GitHub a moment to register the run, then show the most recent ones
+          sleep 5
+          echo ""
+          echo "📋 Recent runs of the build workflow:"
+          gh run list \
+            --workflow "Build RISC-V runner (Fixed AppHost Registration)" \
+            --limit 3 \
+            --repo "${{ github.repository }}"
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## 🔍 Upstream Version Check"
+            echo ""
+            echo "| Field            | Value |"
+            echo "|------------------|-------|"
+            echo "| Upstream latest  | \`${{ steps.upstream.outputs.tag }}\` |"
+            echo "| Branch version   | \`${{ steps.current.outputs.version }}\` |"
+            echo "| Release exists   | ${{ steps.release-check.outputs.exists }} |"
+            echo "| Upstream synced  | ${{ steps.sync.outputs.synced || 'no' }} |"
+            echo "| Build triggered  | ${{ steps.decide.outputs.should_build }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
