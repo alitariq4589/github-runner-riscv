@@ -114,6 +114,12 @@ jobs:
           git remote add upstream https://github.com/actions/runner.git
           git fetch upstream "refs/tags/${{ steps.upstream.outputs.tag }}:refs/tags/${{ steps.upstream.outputs.tag }}"
 
+          # Remember our branch tip so we can restore our workflow files after the merge.
+          # GITHUB_TOKEN cannot push changes to .github/workflows/, so upstream workflow
+          # changes must never make it into the merge commit.
+          OUR_TIP=$(git rev-parse HEAD)
+          echo "Branch tip before merge: $OUR_TIP"
+
           echo "=== Merging upstream ${{ steps.upstream.outputs.tag }} into riscv_dotnet10_build ==="
           if git merge "${{ steps.upstream.outputs.tag }}" --no-edit \
               -m "chore: sync with upstream ${{ steps.upstream.outputs.tag }}"; then
@@ -121,13 +127,11 @@ jobs:
           else
             echo "⚠️  Merge conflicts detected – attempting auto-resolution"
 
-            # Always keep our CI configuration as-is
             if [ -d .github/workflows ]; then
               git checkout --ours .github/workflows/ || true
               git add .github/workflows/ || true
             fi
 
-            # Fail loudly if anything else is still unresolved
             if git ls-files -u | grep -q .; then
               echo "❌ Unresolved conflicts – manual intervention required:"
               git ls-files -u
@@ -136,6 +140,23 @@ jobs:
             fi
 
             git commit -m "chore: sync with upstream ${{ steps.upstream.outputs.tag }} (auto-resolved)"
+          fi
+
+          # --- Reset .github/workflows/ to exactly what was on our branch pre-merge ---
+          # Stage deletion of every workflow file currently in the tree, then extract the
+          # pre-merge versions back. Net effect: only our workflows remain.
+          echo "=== Restoring .github/workflows/ to pre-merge state ==="
+          if [ -d .github/workflows ]; then
+            git rm -rf --ignore-unmatch .github/workflows/ >/dev/null 2>&1 || true
+          fi
+          git checkout "$OUR_TIP" -- .github/workflows/ 2>/dev/null || true
+          git add .github/workflows/ 2>/dev/null || true
+
+          if ! git diff --cached --quiet; then
+            git commit --amend --no-edit
+            echo "✅ Amended merge commit – our workflow files preserved"
+          else
+            echo "ℹ️  No upstream workflow changes to strip"
           fi
 
           echo "=== Pushing synced changes ==="
