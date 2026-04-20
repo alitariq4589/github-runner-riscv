@@ -3,7 +3,7 @@ name: Build RISC-V runner (Fixed AppHost Registration)
 on:
   push:
     branches:
-      - riscv_dotnet10_build
+      - main
   workflow_dispatch:
 
 jobs:
