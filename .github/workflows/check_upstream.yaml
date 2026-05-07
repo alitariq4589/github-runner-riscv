@@ -6,72 +6,51 @@ on:
   workflow_dispatch:
     inputs:
       force_build:
-        description: 'Force a build even if no upstream update is detected'
+        description: 'Force a build even if a release already exists'
         required: false
         type: boolean
         default: false
+      version_override:
+        description: 'Specific upstream version to build (e.g. 2.334.0). Leave empty to use latest.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
-  contents: write
+  contents: read
   actions: write
 
 env:
-  # The branch that holds the RISC-V fork and is built by the sibling workflow.
-  TARGET_BRANCH: main
-  # Display name of the build workflow we dispatch after a successful sync.
   BUILD_WORKFLOW_NAME: Build RISC-V runner (Fixed AppHost Registration)
+  UPSTREAM_REPO: actions/runner
 
 jobs:
   check-upstream:
     runs-on: ubuntu-latest
-
-    outputs:
-      should_build:     ${{ steps.decide.outputs.should_build }}
-      upstream_version: ${{ steps.upstream.outputs.version }}
-      synced:           ${{ steps.sync.outputs.synced }}
-
     steps:
-      - name: Checkout ${{ env.TARGET_BRANCH }}
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ env.TARGET_BRANCH }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Fetch latest upstream release
+      - name: Determine target upstream version
         id: upstream
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "=== Fetching latest actions/runner release ==="
-          LATEST=$(curl -sSL \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/actions/runner/releases/latest \
-            | jq -r .tag_name)
-
-          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
-            echo "❌ Failed to fetch upstream latest release"
-            exit 1
-          fi
-
-          VERSION=${LATEST#v}
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$LATEST"       >> "$GITHUB_OUTPUT"
-          echo "📦 Upstream latest: $LATEST (version: $VERSION)"
-
-      - name: Read current branch version
-        id: current
-        run: |
-          if [ -f src/runnerversion ]; then
-            CURRENT=$(tr -d '[:space:]' < src/runnerversion)
+          if [ -n "${{ inputs.version_override }}" ]; then
+            VERSION="${{ inputs.version_override }}"
+            VERSION="${VERSION#v}"
+            echo "Using manual override: v$VERSION"
           else
-            CURRENT="unknown"
+            echo "Fetching latest release from $UPSTREAM_REPO..."
+            TAG=$(gh release view --repo "$UPSTREAM_REPO" --json tagName --jq .tagName)
+            if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+              echo "❌ Failed to fetch upstream latest release"
+              exit 1
+            fi
+            VERSION="${TAG#v}"
           fi
-          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
-          echo "📌 Current ${{ env.TARGET_BRANCH }} version: $CURRENT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"    >> "$GITHUB_OUTPUT"
+          echo "📦 Target upstream version: v$VERSION"
 
-      - name: Check if release already exists
+      - name: Check if release already exists in this repo
         id: release-check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -90,107 +69,34 @@ jobs:
         run: |
           SHOULD_BUILD=false
           REASON=""
-
           if [ "${{ inputs.force_build }}" = "true" ]; then
             SHOULD_BUILD=true
             REASON="force_build input is true"
-          elif [ "${{ steps.upstream.outputs.version }}" != "${{ steps.current.outputs.version }}" ]; then
-            SHOULD_BUILD=true
-            REASON="upstream (${{ steps.upstream.outputs.version }}) differs from branch (${{ steps.current.outputs.version }})"
           elif [ "${{ steps.release-check.outputs.exists }}" = "false" ]; then
             SHOULD_BUILD=true
-            REASON="no release exists for current version"
+            REASON="no release exists for v${{ steps.upstream.outputs.version }}"
           else
-            REASON="branch is up-to-date and release already exists"
+            REASON="release for v${{ steps.upstream.outputs.version }} already exists"
           fi
-
           echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
           echo "🤔 Decision: should_build=$SHOULD_BUILD"
           echo "   Reason: $REASON"
-
-      - name: Sync upstream changes into ${{ env.TARGET_BRANCH }}
-        id: sync
-        if: steps.decide.outputs.should_build == 'true' && steps.upstream.outputs.version != steps.current.outputs.version
-        run: |
-          set -e
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          echo "=== Adding upstream remote and fetching tag ==="
-          git remote add upstream https://github.com/actions/runner.git
-          git fetch upstream "refs/tags/${{ steps.upstream.outputs.tag }}:refs/tags/${{ steps.upstream.outputs.tag }}"
-
-          echo "=== Merging upstream ${{ steps.upstream.outputs.tag }} into ${{ env.TARGET_BRANCH }} ==="
-          if git merge "${{ steps.upstream.outputs.tag }}" --no-edit \
-              -m "chore: sync with upstream ${{ steps.upstream.outputs.tag }}"; then
-            echo "✅ Clean merge"
-          else
-            echo "⚠️  Merge conflicts detected – attempting auto-resolution"
-
-            # Always keep our CI configuration as-is
-            if [ -d .github/workflows ]; then
-              git checkout --ours .github/workflows/ || true
-              git add .github/workflows/ || true
-            fi
-
-            # Fail loudly if anything else is still unresolved
-            if git ls-files -u | grep -q .; then
-              echo "❌ Unresolved conflicts – manual intervention required:"
-              git ls-files -u
-              git merge --abort
-              exit 1
-            fi
-
-            git commit -m "chore: sync with upstream ${{ steps.upstream.outputs.tag }} (auto-resolved)"
-          fi
-
-          # -----------------------------------------------------------------
-          # GITHUB_TOKEN cannot push changes under .github/workflows/ because
-          # it lacks the `workflows` scope. Upstream's own CI workflows are
-          # irrelevant to this fork, so reset that directory to exactly what
-          # our branch had before the merge, then amend the merge commit.
-          # -----------------------------------------------------------------
-          echo "=== Restoring .github/workflows/ to pre-merge state ==="
-          OUR_PARENT=$(git rev-parse HEAD^1)
-          echo "Our pre-merge commit: $OUR_PARENT"
-
-          rm -rf .github/workflows
-          if git ls-tree "$OUR_PARENT" -- .github/workflows/ | grep -q .; then
-            git checkout "$OUR_PARENT" -- .github/workflows/
-          else
-            git rm -rf --cached --ignore-unmatch .github/workflows/ >/dev/null 2>&1 || true
-          fi
-
-          git add -A .github/workflows/ 2>/dev/null || true
-
-          if ! git diff --cached --quiet; then
-            git commit --amend --no-edit
-            echo "✅ Reverted upstream .github/workflows/ changes; merge commit amended"
-          else
-            echo "ℹ️  Upstream made no changes under .github/workflows/"
-          fi
-
-          echo "=== Pushing synced changes ==="
-          git push origin "${{ env.TARGET_BRANCH }}"
-          echo "synced=true" >> "$GITHUB_OUTPUT"
-          echo "✅ Pushed upstream changes to ${{ env.TARGET_BRANCH }}"
 
       - name: Trigger build workflow
         if: steps.decide.outputs.should_build == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "🚀 Dispatching '${{ env.BUILD_WORKFLOW_NAME }}' on ${{ env.TARGET_BRANCH }}"
-
-          gh workflow run "${{ env.BUILD_WORKFLOW_NAME }}" \
-            --ref  "${{ env.TARGET_BRANCH }}" \
-            --repo "${{ github.repository }}"
-
+          echo "🚀 Dispatching '$BUILD_WORKFLOW_NAME' for v${{ steps.upstream.outputs.version }}"
+          gh workflow run "$BUILD_WORKFLOW_NAME" \
+            --ref  main \
+            --repo "${{ github.repository }}" \
+            -f version="${{ steps.upstream.outputs.version }}"
           sleep 5
           echo ""
           echo "📋 Recent runs of the build workflow:"
           gh run list \
-            --workflow "${{ env.BUILD_WORKFLOW_NAME }}" \
+            --workflow "$BUILD_WORKFLOW_NAME" \
             --limit 3 \
             --repo "${{ github.repository }}"
 
@@ -202,10 +108,7 @@ jobs:
             echo ""
             echo "| Field            | Value |"
             echo "|------------------|-------|"
-            echo "| Target branch    | \`${{ env.TARGET_BRANCH }}\` |"
-            echo "| Upstream latest  | \`${{ steps.upstream.outputs.tag }}\` |"
-            echo "| Branch version   | \`${{ steps.current.outputs.version }}\` |"
+            echo "| Upstream target  | \`v${{ steps.upstream.outputs.version }}\` |"
             echo "| Release exists   | ${{ steps.release-check.outputs.exists }} |"
-            echo "| Upstream synced  | ${{ steps.sync.outputs.synced || 'no' }} |"
             echo "| Build triggered  | ${{ steps.decide.outputs.should_build }} |"
           } >> "$GITHUB_STEP_SUMMARY"
