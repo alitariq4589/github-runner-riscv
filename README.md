@@ -13,7 +13,7 @@ The build pipeline:
 - Targets `net8.0` with patched SDK metadata to unlock AppHost generation for `linux-riscv64`
 - Bundles RISC-V builds of [Node.js 20](https://unofficial-builds.nodejs.org/download/release/v20.9.0/) and [Node.js 24](https://github.com/alitariq4589/nodejs-riscv/releases/) for action execution
 - Disables the runner's built-in auto-updater (no official RISC-V packages exist upstream to update to)
-- Built on Milk-V Pioneer Box and Debian Trixie in native RISC-V architecture
+- Built on [Scaleway EM RV1](https://labs.scaleway.com/en/em-rv1/) provided by [RISE CI runners](https://github.com/apps/rise-risc-v-runners) (they also provide runners for individual repositories [here](https://github.com/apps/rise-risc-v-runners-personal))
 
 All the changes are added in the worklfow. Check [this](https://github.com/alitariq4589/github-runner-riscv/blob/riscv_dotnet10_build/.github/workflows/build_riscv.yaml) workflow for details on how this package is built.
 
@@ -23,7 +23,7 @@ All the changes are added in the worklfow. Check [this](https://github.com/alita
 
 ### 1. Download the latest release
 
-Download the latest release from [Releases](https://github.com/alitariq4589/github-runner-riscv/releases)
+Download the latest release from [Releases](https://github.com/Cloud-V-10xE/github-runner-riscv/releases)
 
 ### 2. Extract
 
