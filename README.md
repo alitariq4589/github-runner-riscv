@@ -2,6 +2,8 @@
 
 GitHub [actions/runner](https://github.com/actions/runner) with build support for RISC-V 64-bit Linux systems.
 
+## For RISC-V releases, refer to [Cloud-V-10xE/github-runner-riscv](https://github.com/Cloud-V-10xE/github-runner-riscv/releases)
+
 ---
 
 ## Overview
